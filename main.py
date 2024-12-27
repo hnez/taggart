@@ -7,7 +7,7 @@ def main(argv):
     cmd = argv[1:2]
     args = argv[2:]
 
-    db = Database("taggart.db")
+    db = Database("taggart.db", use_torch=True)
 
     if cmd == ["add"]:
         for dir in args:

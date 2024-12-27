@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import contextlib
+import importlib
 import os
 import re
 import sqlite3
@@ -54,10 +55,17 @@ class Database:
 
     RE_IMAGE_EXT = re.compile(r"(?i)\.(?:png$)|(?:jpe?g$)")
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, use_torch=False):
         self._db = sqlite3.connect(path)
         self._embeddings_path = path.removesuffix(".db") + ".embeddings"
         self._embeddings_mmap = None
+        self._torch = None
+
+        if use_torch:
+            try:
+                self._torch = importlib.import_module("torch")
+            except ModuleNotFoundError:
+                print("Failed to import torch. Continuing without it.")
 
         for create in self.CREATE_TABLES:
             self.execute(create)
@@ -86,7 +94,12 @@ class Database:
 
             shape = (current_size // bytes_per_row, elems_per_row)
 
-            self._embeddings_mmap = np.memmap(self._embeddings_path, np.float32, "r+", 0, shape)
+            mmap = np.memmap(self._embeddings_path, np.float32, "r+", 0, shape)
+
+            if self._torch is not None:
+                mmap = self._torch.from_numpy(mmap).cuda()
+
+            self._embeddings_mmap = mmap
 
         return self._embeddings_mmap
 
@@ -148,7 +161,10 @@ class Database:
         embedding = embeddings[id]
         cosine_similarities = embeddings @ embedding
 
-        embeddings_norms = np.linalg.norm(embeddings, axis=-1)
+        if self._torch is not None:
+            embeddings_norms = self._torch.norm(embeddings, dim=-1)
+        else:
+            embeddings_norms = np.linalg.norm(embeddings, axis=-1)
         embeddings_norms += eps
 
         embedding_norm = embeddings_norms[id]
@@ -158,10 +174,17 @@ class Database:
         cosine_similarities /= embeddings_norms
         cosine_similarities /= embedding_norm
 
-        sorted_indices = np.argsort(cosine_similarities)
-        top = sorted_indices[-top_k:]
+        if self._torch is not None:
+            top_values, top_indices = self._torch.topk(cosine_similarities, top_k)
+        else:
+            sorted_indices = np.argsort(cosine_similarities)
+            top_indices = sorted_indices[-top_k:]
+            top_values = cosine_similarities[top_indices]
 
-        pairs = tuple((int(idx), float(cosine_similarities[idx])) for idx in top)
+        top_values = top_values.tolist()
+        top_indices = top_indices.tolist()
+
+        pairs = tuple(zip(top_indices, top_values))
 
         return pairs
 
