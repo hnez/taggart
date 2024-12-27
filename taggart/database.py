@@ -159,7 +159,7 @@ class Database:
         cosine_similarities /= embedding_norm
 
         sorted_indices = np.argsort(cosine_similarities)
-        top = sorted_indices[-(top_k + 1) :]
+        top = sorted_indices[-top_k:]
 
         pairs = tuple((int(idx), float(cosine_similarities[idx])) for idx in top)
 

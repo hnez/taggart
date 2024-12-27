@@ -11,53 +11,26 @@ body {
   position: relative;
 }
 
-#icenter {
+.roster-element {
+  max-width: 6.5%;
+  margin: 0.3%;
+}
+
+#main {
   position: absolute;
-  top: 50%;
+  top: 0;
   left: 50%;
 
   height: 80vh;
   width: 80vw;
   object-fit: contain;
 
-  transform: translate(-50%, -50%);
+  transform: translate(-50%, -0%);
 }
 
-#itop,
-#ibottom,
-#iright,
-#ileft {
+#roster {
   position: absolute;
-  max-width: 10%;
-  max-height: 10%;
-}
-
-#itop {
-  top: 0;
-  left: 50%;
-
-  transform: translate(-50%, 0);
-}
-
-#ibottom {
   bottom: 0;
-  left: 50%;
-
-  transform: translate(-50%, 0);
-}
-
-#ileft {
-  top: 50%;
-  left: 0%;
-
-  transform: translate(0, -50%);
-}
-
-#iright {
-  top: 50%;
-  right: 0%;
-
-  transform: translate(0, -50%);
 }
 
 .fullscreen {

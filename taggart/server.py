@@ -1,32 +1,32 @@
 #!/usr/bin/env python3
 
+import functools
+
 import bottle
 
 from .database import Database
 
 
 class Server:
+    STATIC_ROUTES = (
+        ("/", "index.html"),
+        ("/script.js", "script.js"),
+        ("/style.css", "style.css"),
+        ("/spinner.gif", "spinner.gif"),
+    )
+
     def __init__(self, db: Database):
         self.db = db
         self.app = bottle.Bottle()
 
-        self.app.get("/", callback=self.get_index)
-        self.app.get("/script.js", callback=self.get_script)
-        self.app.get("/style.css", callback=self.get_style)
+        for route, filename in self.STATIC_ROUTES:
+            self.app.get(route, callback=functools.partial(bottle.static_file, filename, "static"))
+
         self.app.get("/img/<id:int>.json", callback=self.get_image_info)
         self.app.get("/img/<id:int>.jpg", callback=self.get_image_file)
 
     def run(self):
         self.app.run()
-
-    def get_index(self):
-        return bottle.static_file("index.html", "static")
-
-    def get_script(self):
-        return bottle.static_file("script.js", "static")
-
-    def get_style(self):
-        return bottle.static_file("style.css", "static")
 
     def get_image_info(self, id: int):
         count = self.db.image_count()

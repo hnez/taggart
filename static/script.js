@@ -1,72 +1,49 @@
-var config = {
-  keys: {
-    up: ["ArrowUp", "PageUp", "Backspace"],
-    down: ["ArrowDown", "PageDown", " "],
-    left: ["ArrowLeft"],
-    right: ["ArrowRight"],
-    fullscreen: ["f"],
-  },
-};
-
-var undo = [];
 var pic = null;
 
-async function chpic(tpe, ud) {
-  var picnum = pic !== null ? pic.id : 1;
-
-  if (tpe === "s") {
-    if (ud > 0) {
-      picnum = pic.serial_next;
-    } else {
-      picnum = pic.serial_prev;
-    }
-  }
-
-  if (tpe === "r") {
-    if (ud > 0) {
-      picnum = pic.shuffle_next;
-    } else {
-      picnum = pic.shuffle_prev;
-    }
-  }
-
-  undo.push(picnum);
-
-  const response = await fetch(`/img/${picnum}.json`);
+async function load_image(id) {
+  const response = await fetch(`/img/${id}.json`);
   pic = await response.json();
 
-  document.getElementById("icenter").src = `/img/${pic.id}.jpg`;
-  document.getElementById("itop").src = `/img/${pic.serial_prev}.jpg`;
-  document.getElementById("ibottom").src = `/img/${pic.serial_next}.jpg`;
+  document.getElementById("main").src = `/img/${pic.id}.jpg`;
 
-  document.getElementById("ileft").src = `/img/${pic.shuffle_prev}.jpg`;
-  document.getElementById("iright").src = `/img/${pic.shuffle_next}.jpg`;
-}
+  var roster = [
+    pic.serial_prev,
+    pic.serial_next,
+    pic.shuffle_prev,
+    pic.shuffle_next,
+  ];
 
-function fscreen() {
-  var haupt = document.getElementById("icenter");
-
-  if (haupt.classList.contains("fullscreen")) {
-    haupt.classList.remove("fullscreen");
-  } else {
-    haupt.classList.add("fullscreen");
+  for (let idx_sim of pic.similar.reverse()) {
+    roster.push(idx_sim[0]);
   }
+
+  var imgs = [];
+
+  for (let idx of roster) {
+    let img = document.createElement("img");
+    img.className = "roster-element";
+    img.src = `/img/${idx}.jpg`;
+
+    let a = document.createElement("a");
+    a.href = `#${idx}`;
+    a.appendChild(img);
+
+    imgs.push(a);
+  }
+
+  document.getElementById("roster").replaceChildren(...imgs);
 }
 
 async function init() {
   console.log("OK let's go!");
 
-  document.body.addEventListener(
-    "keyup",
-    (k) => {
-      if (config.keys.up.includes(k.key)) chpic("s", -1);
-      if (config.keys.down.includes(k.key)) chpic("s", 1);
-      if (config.keys.left.includes(k.key)) chpic("r", -1);
-      if (config.keys.right.includes(k.key)) chpic("r", 1);
-      if (config.keys.fullscreen.includes(k.key)) fscreen();
-    },
-    false,
-  );
+  window.addEventListener("hashchange", (ev) => {
+    const url = URL.parse(ev.newURL);
+    const hash = url.hash;
+    const idx = Number(hash.substring(1));
 
-  await chpic("init", 0);
+    load_image(idx);
+  });
+
+  await load_image(1);
 }
