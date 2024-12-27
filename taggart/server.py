@@ -25,8 +25,8 @@ class Server:
         self.app.get("/img/<id:int>.json", callback=self.get_image_info)
         self.app.get("/img/<id:int>.jpg", callback=self.get_image_file)
 
-    def run(self):
-        self.app.run()
+    def run(self, *kargs, **kwargs):
+        self.app.run(*kargs, **kwargs)
 
     def get_image_info(self, id: int):
         count = self.db.image_count()
