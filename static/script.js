@@ -45,5 +45,12 @@ async function init() {
     load_image(idx);
   });
 
-  await load_image(1);
+  var initial_image = 1;
+
+  if (window.location.hash) {
+    const hash = window.location.hash;
+    initial_image = Number(hash.substring(1));
+  }
+
+  await load_image(initial_image);
 }
