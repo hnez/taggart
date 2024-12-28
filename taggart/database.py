@@ -29,7 +29,8 @@ class Database:
         ) STRICT""",
         """CREATE TABLE IF NOT EXISTS image_tags (
             image INTEGER REFERENCES images (rowid),
-            tag INTEGER REFERENCES tags (rowid)
+            tag INTEGER REFERENCES tags (rowid),
+            UNIQUE(image, tag)
         ) STRICT""",
         "CREATE INDEX IF NOT EXISTS image_tags_image ON image_tags (image)",
         "CREATE INDEX IF NOT EXISTS image_tags_tag ON image_tags (tag)",
@@ -38,12 +39,20 @@ class Database:
     )
 
     INSERT_IMAGES = "INSERT OR IGNORE INTO images (path, ts_added) VALUES (?, unixepoch())"
+    INSERT_TAG = "INSERT OR IGNORE INTO tags (label) VALUES (?)"
+    INSERT_TAG_IMAGE = """INSERT OR IGNORE INTO image_tags (image, tag)
+        SELECT ?, rowid FROM tags WHERE label == ?"""
+
+    DELETE_TAG_IMAGE = "DELETE FROM image_tags WHERE image == ? AND tag == (SELECT rowid FROM tags WHERE label == ?)"
+
     SELECT_IMAGE_PATHS = "SELECT path FROM images where rowid == ?"
     SELECT_IMAGE_TAGS = """SELECT label FROM image_tags
         INNER JOIN tags ON image_tags.tag == tags.rowid
         WHERE image_tags.image == ?"""
     SELECT_IMAGE_COUNT = "SELECT COUNT(*) FROM images"
-    SET_META = """UPDATE images SET
+    SELECT_TAGS = "SELECT DISTINCT label, rowid FROM tags"
+
+    UPDATE_META = """UPDATE images SET
         file_size = :file_size,
         width = :width,
         height = :height,
@@ -51,7 +60,7 @@ class Database:
         exif_ts = :exif_ts,
         broken = :is_broken
       WHERE rowid == :id"""
-    SET_HAS_EMBEDDING = "UPDATE images SET has_embedding = TRUE WHERE rowid == ?"
+    UPDATE_HAS_EMBEDDING = "UPDATE images SET has_embedding = TRUE WHERE rowid == ?"
 
     RE_IMAGE_EXT = re.compile(r"(?i)\.(?:png$)|(?:jpe?g$)")
 
@@ -150,6 +159,14 @@ class Database:
 
         return tags
 
+    def image_add_tag(self, image_id: int, tag: str):
+        with self._db:
+            self._db.execute(self.INSERT_TAG, (tag,))
+            self._db.execute(self.INSERT_TAG_IMAGE, (image_id, tag))
+
+    def image_remove_tag(self, image_id: int, tag: str):
+        self.execute(self.DELETE_TAG_IMAGE, (image_id, tag))
+
     def image_count(self):
         (count,) = self.execute(self.SELECT_IMAGE_COUNT).fetchone()
 
@@ -188,11 +205,14 @@ class Database:
 
         return pairs
 
+    def tags(self):
+        return dict(self.execute(self.SELECT_TAGS))
+
     def update_meta(
         self, id: int, is_broken: bool, file_size: int, width: int, height: int, exif_camera: str, exif_ts: int
     ):
         self.execute(
-            self.SET_META,
+            self.UPDATE_META,
             {
                 "id": id,
                 "is_broken": is_broken,
@@ -208,7 +228,7 @@ class Database:
         embeddings = self.embeddings_mmap()
         embeddings[id] = embedding
 
-        self.execute(self.SET_HAS_EMBEDDING, (id,))
+        self.execute(self.UPDATE_HAS_EMBEDDING, (id,))
 
 
 if __name__ == "__main__":
