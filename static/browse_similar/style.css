@@ -20,6 +20,8 @@ body {
 
   border-radius: 0.3em;
   box-shadow: 0 0 0.3em #00000054;
+
+  display: inline-block;
 }
 
 .tag.hidden {
@@ -78,7 +80,7 @@ body {
 #tags-editor {
   background-color: #f3f2ef;
   height: 62%;
-  width: 12%;
+  width: 20%;
 
   position: absolute;
   top: 2em;
