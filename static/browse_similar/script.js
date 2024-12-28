@@ -112,7 +112,8 @@ async function load_image(id) {
   let tags_suggested_div = document.getElementById("tags-suggested");
   tags_suggested_div.querySelectorAll(".tag").forEach((tag) => tag.remove());
 
-  for (let tag_name of pic.tags.available) {
+  for (let tag_name_and_similarity of pic.tags.available.reverse()) {
+    let tag_name = tag_name_and_similarity[0];
     tags_suggested_div.appendChild(tag_span(pic.id, tag_name, "add"));
   }
 

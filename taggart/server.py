@@ -36,15 +36,13 @@ class Server:
         count = self.db.image_count()
         path = self.db.image_path(id)
         current_tags = self.db.image_tags(id)
-        available_tags = self.db.tags()
         shuffle_prev, shuffle_next = self.db.image_shuffle_neighbors(id)
 
         serial_next = id % count + 1
         serial_prev = (count + id - 2) % count + 1
 
-        similar = self.db.image_similar(id)
-
-        available_tags = tuple(available_tags)
+        similar = self.db.images_similar(id)
+        available_tags = self.db.tags_similar(id)
 
         return {
             "tags": {
@@ -66,7 +64,7 @@ class Server:
         return bottle.static_file(path, "/")
 
     def add_tag_to_image(self, id: int, name: str):
-        self.db.image_add_tag(id, name)
+        self.db.image_add_tag(id, name.strip().lower())
 
     def remove_tag_from_image(self, id: int, name: str):
-        self.db.image_remove_tag(id, name)
+        self.db.image_remove_tag(id, name.strip().lower())

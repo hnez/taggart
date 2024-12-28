@@ -2,6 +2,7 @@
 
 import contextlib
 import importlib
+import itertools as it
 import os
 import re
 import sqlite3
@@ -51,6 +52,7 @@ class Database:
         WHERE image_tags.image == ?"""
     SELECT_IMAGE_COUNT = "SELECT COUNT(*) FROM images"
     SELECT_TAGS = "SELECT DISTINCT label, rowid FROM tags"
+    SELECT_ALL_TAG_IMAGE_PAIRS = "SELECT tag, image FROM image_tags ORDER BY tag"
 
     UPDATE_META = """UPDATE images SET
         file_size = :file_size,
@@ -68,6 +70,7 @@ class Database:
         self._db = sqlite3.connect(path)
         self._embeddings_path = path.removesuffix(".db") + ".embeddings"
         self._embeddings_mmap = None
+        self._tag_embeddings = None
         self._torch = None
 
         if use_torch:
@@ -111,6 +114,32 @@ class Database:
             self._embeddings_mmap = mmap
 
         return self._embeddings_mmap
+
+    def tag_embeddings(self):
+        if self._tag_embeddings is None:
+            embeddings = self.embeddings_mmap()
+
+            res = self.execute(self.SELECT_ALL_TAG_IMAGE_PAIRS)
+
+            image_ids_per_tag = dict(
+                (tag, list(idx for _tag, idx in tag_image_pair))
+                for tag, tag_image_pair in it.groupby(res, lambda p: p[0])
+            )
+
+            tag_dim = max(image_ids_per_tag.keys()) + 1
+            emb_dim = self.EMBEDDING_VEC_LEN
+
+            if self._torch is not None:
+                self._tag_embeddings = self._torch.zeros(
+                    (tag_dim, emb_dim), dtype=embeddings.dtype, device=embeddings.device
+                )
+            else:
+                self._tag_embeddings = np.zeros((tag_dim, emb_dim))
+
+            for tag, image_ids in image_ids_per_tag.items():
+                self._tag_embeddings[tag] = embeddings[image_ids].sum(0)
+
+        return self._tag_embeddings
 
     def execute(self, *kargs, **kwargs):
         with self._db:
@@ -164,39 +193,43 @@ class Database:
             self._db.execute(self.INSERT_TAG, (tag,))
             self._db.execute(self.INSERT_TAG_IMAGE, (image_id, tag))
 
+        # TODO: update the embeddings right here by adding the image embeddings
+        # _if_ the tag was not already on the image before.
+        self._tag_embeddings = None
+
     def image_remove_tag(self, image_id: int, tag: str):
         self.execute(self.DELETE_TAG_IMAGE, (image_id, tag))
+
+        # TODO: update the embeddings right here by subtracting the image embeddings
+        # _if_ the tag was on the image before.
+        self._tag_embeddings = None
 
     def image_count(self):
         (count,) = self.execute(self.SELECT_IMAGE_COUNT).fetchone()
 
         return count
 
-    def image_similar(self, id: int, top_k=10, eps=1e-6):
-        embeddings = self.embeddings_mmap()
+    def _norm(self, a, dim=-1, eps=1e-6):
+        norm = np.linalg.norm(a, axis=dim) if self._torch is None else self._torch.norm(a, dim=dim)
+        norm += eps
 
-        embedding = embeddings[id]
-        cosine_similarities = embeddings @ embedding
+        return norm
 
+    def _cosine_similarity(self, a, b):
+        res = a @ b
+
+        res /= self._norm(a)
+        res /= self._norm(b)
+
+        return res
+
+    def _top_k(self, x, top_k):
         if self._torch is not None:
-            embeddings_norms = self._torch.norm(embeddings, dim=-1)
+            top_values, top_indices = self._torch.topk(x, top_k)
         else:
-            embeddings_norms = np.linalg.norm(embeddings, axis=-1)
-        embeddings_norms += eps
-
-        embedding_norm = embeddings_norms[id]
-
-        # Suppress _this_ image as it would always be the most similar
-        cosine_similarities[id] = 0
-        cosine_similarities /= embeddings_norms
-        cosine_similarities /= embedding_norm
-
-        if self._torch is not None:
-            top_values, top_indices = self._torch.topk(cosine_similarities, top_k)
-        else:
-            sorted_indices = np.argsort(cosine_similarities)
+            sorted_indices = np.argsort(x)
             top_indices = sorted_indices[-top_k:]
-            top_values = cosine_similarities[top_indices]
+            top_values = x[top_indices]
 
         top_values = top_values.tolist()
         top_indices = top_indices.tolist()
@@ -204,6 +237,37 @@ class Database:
         pairs = tuple(zip(top_indices, top_values))
 
         return pairs
+
+    def tags_similar(self, id):
+        embeddings = self.embeddings_mmap()
+        image_emb = embeddings[id]
+        tag_emb = self.tag_embeddings()
+
+        cosine_similarities = self._cosine_similarity(tag_emb, image_emb)
+
+        id_to_name = dict((id, name) for name, id in self.tags().items())
+
+        if self._torch is not None:
+            values, indices = self._torch.sort(cosine_similarities)
+        else:
+            indices = np.argsort(cosine_similarities)
+            values = cosine_similarities[indices]
+
+        values = values.tolist()
+        indices = indices.tolist()
+
+        return list((id_to_name[idx], val) for idx, val in zip(indices, values) if idx in id_to_name)
+
+    def images_similar(self, id: int, top_k=10, eps=1e-6):
+        embeddings = self.embeddings_mmap()
+        image_emb = embeddings[id]
+
+        cosine_similarities = self._cosine_similarity(embeddings, image_emb)
+
+        # Suppress _this_ image as it would always be the most similar
+        cosine_similarities[id] = 0
+
+        return self._top_k(cosine_similarities, top_k)
 
     def tags(self):
         return dict(self.execute(self.SELECT_TAGS))
@@ -232,4 +296,4 @@ class Database:
 
 
 if __name__ == "__main__":
-    db = Database("taggart.db")
+    db = Database("taggart.db", use_torch=True)
