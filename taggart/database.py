@@ -52,6 +52,11 @@ class Database:
         WHERE image_tags.image == ?"""
     SELECT_IMAGE_COUNT = "SELECT COUNT(*) FROM images"
     SELECT_TAGS = "SELECT DISTINCT label, rowid FROM tags"
+    SELECT_TAGS_BY_OCCURRENCE = """SELECT label, COUNT(image) AS occurrences FROM image_tags
+        INNER JOIN tags ON image_tags.tag == tags.rowid
+        GROUP BY tag
+        ORDER BY occurrences DESC;
+    """
     SELECT_TAG_ID = "SELECT rowid FROM tags WHERE label == ?"
     SELECT_ALL_TAG_IMAGE_PAIRS = "SELECT tag, image FROM image_tags ORDER BY tag"
 
@@ -210,8 +215,12 @@ class Database:
 
         return count
 
-    def _norm(self, a, dim=-1, eps=1e-6):
-        norm = np.linalg.norm(a, axis=dim) if self._torch is None else self._torch.norm(a, dim=dim)
+    def _norm(self, a, dim, eps=1e-6):
+        norm = (
+            np.linalg.norm(a, axis=dim, keepdim=True)
+            if self._torch is None
+            else self._torch.norm(a, dim=dim, keepdim=True)
+        )
         norm += eps
 
         return norm
@@ -219,8 +228,8 @@ class Database:
     def _cosine_similarity(self, a, b):
         res = a @ b
 
-        res /= self._norm(a)
-        res /= self._norm(b)
+        res /= self._norm(a, -1)
+        res /= self._norm(b, -2)
 
         return res
 
@@ -244,7 +253,10 @@ class Database:
         image_emb = embeddings[id]
         tag_emb = self.tag_embeddings()
 
-        cosine_similarities = self._cosine_similarity(tag_emb, image_emb)
+        tag_emb = tag_emb.unsqueeze(-2)
+        image_emb = image_emb.unsqueeze(0).unsqueeze(-1)
+
+        cosine_similarities = self._cosine_similarity(tag_emb, image_emb).squeeze(-2, -1)
 
         id_to_name = dict((id, name) for name, id in self.tags().items())
 
@@ -259,13 +271,19 @@ class Database:
 
         return list((id_to_name[idx], val) for idx, val in zip(indices, values) if idx in id_to_name)
 
-    def images_similar_to_tag(self, tag_name: str, top_k=1000):
-        (tag_id,) = self.execute(self.SELECT_TAG_ID, (tag_name,)).fetchone()
-        tag_embs = self.tag_embeddings()
-        tag_emb = tag_embs[tag_id]
+    def images_similar_to_tags(self, tags: list[str], top_k=1000):
+        print(tags)
+        tag_ids = list(self.execute(self.SELECT_TAG_ID, (tag,)).fetchone()[0] for tag in tags)
 
         embeddings = self.embeddings_mmap()
-        cosine_similarities = self._cosine_similarity(embeddings, tag_emb)
+        tag_embs = self.tag_embeddings()[tag_ids]
+
+        embeddings = embeddings.unsqueeze(1).unsqueeze(2)
+        tag_embs = tag_embs.unsqueeze(0).unsqueeze(3)
+
+        cosine_similarities = self._cosine_similarity(embeddings, tag_embs)
+        cosine_similarities = cosine_similarities.squeeze(2, 3)
+        cosine_similarities = cosine_similarities.prod(1)
 
         return self._top_k(cosine_similarities, top_k)
 
@@ -273,7 +291,10 @@ class Database:
         embeddings = self.embeddings_mmap()
         image_emb = embeddings[image_id]
 
-        cosine_similarities = self._cosine_similarity(embeddings, image_emb)
+        embeddings = embeddings.unsqueeze(-2)
+        image_emb = image_emb.unsqueeze(0).unsqueeze(-1)
+
+        cosine_similarities = self._cosine_similarity(embeddings, image_emb).squeeze(-2, -1)
 
         # Suppress _this_ image as it would always be the most similar
         cosine_similarities[image_id] = 0
@@ -282,6 +303,9 @@ class Database:
 
     def tags(self):
         return dict(self.execute(self.SELECT_TAGS))
+
+    def tags_by_occurrence(self):
+        return list(self.execute(self.SELECT_TAGS_BY_OCCURRENCE))
 
     def update_meta(
         self, id: int, is_broken: bool, file_size: int, width: int, height: int, exif_camera: str, exif_ts: int

@@ -32,7 +32,8 @@ class Server:
         self.app.put("/img/<id:int>/tags/current/<name>", callback=self.add_tag_to_image)
         self.app.delete("/img/<id:int>/tags/current/<name>", callback=self.remove_tag_from_image)
 
-        self.app.get("/tag/<name>/images/by_embedding.json", callback=self.get_images_by_tag_embedding)
+        self.app.get("/tags.json", callback=self.get_tags)
+        self.app.get("/tag/<filter>/images/by_embedding.json", callback=self.get_images_by_tag_embedding)
 
     def run(self, *kargs, **kwargs):
         self.app.run(*kargs, **kwargs)
@@ -74,7 +75,13 @@ class Server:
     def remove_tag_from_image(self, id: int, name: str):
         self.db.image_remove_tag(id, name.strip().lower())
 
-    def get_images_by_tag_embedding(self, name: str):
-        image_similarity_pairs = self.db.images_similar_to_tag(name)
+    def get_tags(self):
+        tags = self.db.tags_by_occurrence()
+
+        return {"tags": tags}
+
+    def get_images_by_tag_embedding(self, filter: str):
+        tags = filter.split("+")
+        image_similarity_pairs = self.db.images_similar_to_tags(tags)
 
         return {"images": image_similarity_pairs}

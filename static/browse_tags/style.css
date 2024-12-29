@@ -23,6 +23,41 @@ img {
   height: 100%;
 }
 
+.tag {
+  padding: 0.3em;
+  margin: 0.1em;
+
+  border-radius: 0.3em;
+  box-shadow: 0 0 0.3em #00000054;
+
+  display: inline-block;
+}
+
 .tile {
   border: 1px solid black;
+}
+
+#tags-header {
+  position: fixed;
+  width: 100%;
+
+  background-color: #1a1a1a;
+}
+
+#tags-filter,
+#tags-available {
+  height: 1.8em;
+  overflow-y: scroll;
+  white-space: nowrap;
+  padding: 1em;
+
+  border-bottom: 1px solid #9b9b9b;
+}
+
+#tags-filter .tag {
+  background-color: #98f784;
+}
+
+#tags-available .tag {
+  background-color: #ffffcf;
 }

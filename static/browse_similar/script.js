@@ -1,3 +1,5 @@
+"use strict";
+
 var pic = null;
 
 function tag_span(image_id, tag_name, action) {

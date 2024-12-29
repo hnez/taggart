@@ -1,13 +1,100 @@
-var page = null;
+"use strict";
+
 var images = null;
 var page_elements = [];
 
-async function load_image_list(tag_name) {
-  const response = await fetch(`/tag/${tag_name}/images/by_embedding.json`);
-  const json = await response.json();
+function get_filter() {
+  const hash = window.location.hash;
 
-  page = null;
-  images = json.images;
+  if (!hash) {
+    return [];
+  }
+
+  const tags = hash.substring(1).split("+").map(decodeURIComponent);
+
+  return tags;
+}
+
+function populate_filter_elem() {
+  const tags = get_filter();
+
+  const filter_elem = document.getElementById("tags-filter");
+  filter_elem.innerHTML = "";
+
+  for (let tag_name of tags) {
+    let span = document.createElement("span");
+    span.innerText = tag_name;
+    span.className = "tag";
+    span.onclick = (_ev) => remove_tag_from_filter(tag_name);
+
+    filter_elem.appendChild(span);
+  }
+}
+
+function set_filter(tags) {
+  window.location.hash = tags.map(encodeURIComponent).join("+");
+  populate_filter_elem();
+}
+
+function add_tag_to_filter(tag_name) {
+  let tags = get_filter();
+
+  if (tags.includes(tag_name)) {
+    return;
+  }
+
+  tags.push(tag_name);
+
+  set_filter(tags);
+}
+
+function remove_tag_from_filter(tag_name) {
+  let tags = get_filter();
+  const tag_index = tags.indexOf(tag_name);
+
+  if (tag_index < 0) {
+    return;
+  }
+
+  tags.splice(tag_index, 1);
+
+  set_filter(tags);
+}
+
+async function load_tag_list() {
+  const response = await fetch(`/tags.json`);
+  const json = await response.json();
+  const tags = json.tags;
+
+  const available_elem = document.getElementById("tags-available");
+
+  available_elem.innerHTML = "";
+
+  for (let tag of tags) {
+    let tag_name = tag[0];
+
+    let span = document.createElement("span");
+    span.innerText = tag_name;
+    span.className = "tag";
+    span.onclick = (_ev) => add_tag_to_filter(tag_name);
+
+    available_elem.appendChild(span);
+  }
+}
+
+async function load_image_list(filter) {
+  if (filter) {
+    const response = await fetch(`/tag/${filter}/images/by_embedding.json`);
+    const json = await response.json();
+
+    images = json.images;
+  } else {
+    images = [];
+  }
+
+  // Invalidate the current page content
+  page_elements.forEach((el) => el.remove());
+  page_elements = [];
 
   handle_scroll();
 }
@@ -18,7 +105,7 @@ function populate_page(page_div, images) {
     return;
   }
 
-  for (img_sim of images) {
+  for (let img_sim of images) {
     let idx = img_sim[0];
 
     let img = document.createElement("img");
@@ -46,11 +133,13 @@ function handle_scroll(_ev) {
     page_elements.pop().remove();
   }
 
+  let pages_elem = document.getElementById("pages");
+
   while (page_elements.length < num_pages) {
     let div = document.createElement("div");
     div.className = "page";
 
-    document.body.appendChild(div);
+    pages_elem.appendChild(div);
     page_elements.push(div);
   }
 
@@ -61,11 +150,16 @@ function handle_scroll(_ev) {
     }
   }
 
-  images_upper = images.slice(upper_page * 6, (upper_page + 1) * 6);
-  images_lower = images.slice(lower_page * 6, (lower_page + 1) * 6);
+  let images_upper = images.slice(upper_page * 6, (upper_page + 1) * 6);
+  let images_lower = images.slice(lower_page * 6, (lower_page + 1) * 6);
 
-  populate_page(page_elements[upper_page], images_upper);
-  populate_page(page_elements[lower_page], images_lower);
+  if (images_upper.length > 0) {
+    populate_page(page_elements[upper_page], images_upper);
+  }
+
+  if (images_lower.length > 0) {
+    populate_page(page_elements[lower_page], images_lower);
+  }
 }
 
 async function init() {
@@ -75,9 +169,9 @@ async function init() {
   window.addEventListener("hashchange", (ev) => {
     const url = URL.parse(ev.newURL);
     const hash = url.hash;
-    const tag_name = hash.substring(1);
+    const filter = hash.substring(1);
 
-    load_image_list(tag_name);
+    load_image_list(filter);
   });
 
   // Load and unload images based on scroll position
@@ -85,8 +179,11 @@ async function init() {
 
   if (window.location.hash) {
     const hash = window.location.hash;
-    const tag_name = hash.substring(1);
+    const filter = hash.substring(1);
 
-    load_image_list(tag_name);
+    load_image_list(filter);
+    populate_filter_elem();
   }
+
+  load_tag_list();
 }
