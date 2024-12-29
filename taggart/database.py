@@ -52,6 +52,7 @@ class Database:
         WHERE image_tags.image == ?"""
     SELECT_IMAGE_COUNT = "SELECT COUNT(*) FROM images"
     SELECT_TAGS = "SELECT DISTINCT label, rowid FROM tags"
+    SELECT_TAG_ID = "SELECT rowid FROM tags WHERE label == ?"
     SELECT_ALL_TAG_IMAGE_PAIRS = "SELECT tag, image FROM image_tags ORDER BY tag"
 
     UPDATE_META = """UPDATE images SET
@@ -258,14 +259,24 @@ class Database:
 
         return list((id_to_name[idx], val) for idx, val in zip(indices, values) if idx in id_to_name)
 
-    def images_similar(self, id: int, top_k=10, eps=1e-6):
+    def images_similar_to_tag(self, tag_name: str, top_k=1000):
+        (tag_id,) = self.execute(self.SELECT_TAG_ID, (tag_name,)).fetchone()
+        tag_embs = self.tag_embeddings()
+        tag_emb = tag_embs[tag_id]
+
         embeddings = self.embeddings_mmap()
-        image_emb = embeddings[id]
+        cosine_similarities = self._cosine_similarity(embeddings, tag_emb)
+
+        return self._top_k(cosine_similarities, top_k)
+
+    def images_similar(self, image_id: int, top_k=10):
+        embeddings = self.embeddings_mmap()
+        image_emb = embeddings[image_id]
 
         cosine_similarities = self._cosine_similarity(embeddings, image_emb)
 
         # Suppress _this_ image as it would always be the most similar
-        cosine_similarities[id] = 0
+        cosine_similarities[image_id] = 0
 
         return self._top_k(cosine_similarities, top_k)
 

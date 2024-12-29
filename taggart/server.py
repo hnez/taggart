@@ -15,6 +15,9 @@ class Server:
         ("/browse_similar/", "browse_similar/index.html"),
         ("/browse_similar/script.js", "browse_similar/script.js"),
         ("/browse_similar/style.css", "browse_similar/style.css"),
+        ("/browse_tags/", "browse_tags/index.html"),
+        ("/browse_tags/script.js", "browse_tags/script.js"),
+        ("/browse_tags/style.css", "browse_tags/style.css"),
     )
 
     def __init__(self, db: Database):
@@ -28,6 +31,8 @@ class Server:
         self.app.get("/img/<id:int>.jpg", callback=self.get_image_file)
         self.app.put("/img/<id:int>/tags/current/<name>", callback=self.add_tag_to_image)
         self.app.delete("/img/<id:int>/tags/current/<name>", callback=self.remove_tag_from_image)
+
+        self.app.get("/tag/<name>/images/by_embedding.json", callback=self.get_images_by_tag_embedding)
 
     def run(self, *kargs, **kwargs):
         self.app.run(*kargs, **kwargs)
@@ -68,3 +73,8 @@ class Server:
 
     def remove_tag_from_image(self, id: int, name: str):
         self.db.image_remove_tag(id, name.strip().lower())
+
+    def get_images_by_tag_embedding(self, name: str):
+        image_similarity_pairs = self.db.images_similar_to_tag(name)
+
+        return {"images": image_similarity_pairs}
