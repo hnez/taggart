@@ -69,14 +69,6 @@ body {
   font-size: 1.6em;
 }
 
-#tags-added .tag {
-  background-color: #98f784;
-}
-
-#tags-suggested .tag {
-  background-color: #ffffcf;
-}
-
 #tags-editor {
   background-color: #f3f2ef;
   height: 62%;

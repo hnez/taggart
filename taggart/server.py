@@ -29,8 +29,7 @@ class Server:
 
         self.app.get("/img/<id:int>.json", callback=self.get_image_info)
         self.app.get("/img/<id:int>.jpg", callback=self.get_image_file)
-        self.app.put("/img/<id:int>/tags/current/<name>", callback=self.add_tag_to_image)
-        self.app.delete("/img/<id:int>/tags/current/<name>", callback=self.remove_tag_from_image)
+        self.app.put("/img/<id:int>/tags/current/<name>", callback=self.set_image_tag)
 
         self.app.get("/tags.json", callback=self.get_tags)
         self.app.get("/tag/<filter>/images/by_embedding.json", callback=self.get_images_by_tag_embedding)
@@ -69,11 +68,11 @@ class Server:
 
         return bottle.static_file(path, "/")
 
-    def add_tag_to_image(self, id: int, name: str):
-        self.db.image_add_tag(id, name.strip().lower())
+    def set_image_tag(self, id: int, name: str):
+        req = bottle.request.json
+        weight = req.get("weight", 1)
 
-    def remove_tag_from_image(self, id: int, name: str):
-        self.db.image_remove_tag(id, name.strip().lower())
+        self.db.image_set_tag_weight(id, name.strip().lower(), weight)
 
     def get_tags(self):
         tags = self.db.tags_by_occurrence()

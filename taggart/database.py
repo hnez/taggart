@@ -26,7 +26,8 @@ class Database:
             broken INTEGER NOT NULL DEFAULT 0
         ) STRICT""",
         """CREATE TABLE IF NOT EXISTS tags (
-            label TEXT NOT NULL UNIQUE
+            label TEXT NOT NULL UNIQUE,
+            weight REAL NOT NULL DEFAULT 0
         ) STRICT""",
         """CREATE TABLE IF NOT EXISTS image_tags (
             image INTEGER REFERENCES images (rowid),
@@ -41,24 +42,26 @@ class Database:
 
     INSERT_IMAGES = "INSERT OR IGNORE INTO images (path, ts_added) VALUES (?, unixepoch())"
     INSERT_TAG = "INSERT OR IGNORE INTO tags (label) VALUES (?)"
-    INSERT_TAG_IMAGE = """INSERT OR IGNORE INTO image_tags (image, tag)
-        SELECT ?, rowid FROM tags WHERE label == ?"""
+    INSERT_TAG_IMAGE = """INSERT INTO image_tags (image, tag, weight)
+        SELECT :image, rowid, :weight FROM tags WHERE label == :label
+        ON CONFLICT DO UPDATE SET weight=:weight"""
 
     DELETE_TAG_IMAGE = "DELETE FROM image_tags WHERE image == ? AND tag == (SELECT rowid FROM tags WHERE label == ?)"
 
     SELECT_IMAGE_PATHS = "SELECT path FROM images where rowid == ?"
-    SELECT_IMAGE_TAGS = """SELECT label FROM image_tags
+    SELECT_IMAGE_TAGS = """SELECT label, weight FROM image_tags
         INNER JOIN tags ON image_tags.tag == tags.rowid
-        WHERE image_tags.image == ?"""
+        WHERE image_tags.image == ? AND weight != 0"""
     SELECT_IMAGE_COUNT = "SELECT COUNT(*) FROM images"
     SELECT_TAGS = "SELECT DISTINCT label, rowid FROM tags"
     SELECT_TAGS_BY_OCCURRENCE = """SELECT label, COUNT(image) AS occurrences FROM image_tags
         INNER JOIN tags ON image_tags.tag == tags.rowid
+        WHERE weight != 0
         GROUP BY tag
         ORDER BY occurrences DESC;
     """
     SELECT_TAG_ID = "SELECT rowid FROM tags WHERE label == ?"
-    SELECT_ALL_TAG_IMAGE_PAIRS = "SELECT tag, image FROM image_tags ORDER BY tag"
+    SELECT_ALL_TAG_IMAGE_WEIGHTS = "SELECT tag, image, weight FROM image_tags ORDER BY tag"
 
     UPDATE_META = """UPDATE images SET
         file_size = :file_size,
@@ -87,6 +90,51 @@ class Database:
 
         for create in self.CREATE_TABLES:
             self.execute(create)
+
+    def _zeros(self, shape):
+        if self._torch is not None:
+            return self._torch.zeros(shape, device="cuda")
+        else:
+            return np.zeros(shape)
+
+    def _tensor(self, x: list):
+        if self._torch is not None:
+            return self._torch.tensor(x, device="cuda")
+        else:
+            return np.ndarray(x)
+
+    def _norm(self, a, dim, eps=1e-6):
+        norm = (
+            np.linalg.norm(a, axis=dim, keepdim=True)
+            if self._torch is None
+            else self._torch.norm(a, dim=dim, keepdim=True)
+        )
+        norm += eps
+
+        return norm
+
+    def _cosine_similarity(self, a, b):
+        res = a @ b
+
+        res /= self._norm(a, -1)
+        res /= self._norm(b, -2)
+
+        return res
+
+    def _top_k(self, x, top_k):
+        if self._torch is not None:
+            top_values, top_indices = self._torch.topk(x, top_k)
+        else:
+            sorted_indices = np.argsort(x)
+            top_indices = sorted_indices[-top_k:]
+            top_values = x[top_indices]
+
+        top_values = top_values.tolist()
+        top_indices = top_indices.tolist()
+
+        pairs = tuple(zip(top_indices, top_values))
+
+        return pairs
 
     def embeddings_mmap(self):
         if self._embeddings_mmap is None:
@@ -125,25 +173,22 @@ class Database:
         if self._tag_embeddings is None:
             embeddings = self.embeddings_mmap()
 
-            res = self.execute(self.SELECT_ALL_TAG_IMAGE_PAIRS)
+            res = self.execute(self.SELECT_ALL_TAG_IMAGE_WEIGHTS)
 
-            image_ids_per_tag = dict(
-                (tag, list(idx for _tag, idx in tag_image_pair))
-                for tag, tag_image_pair in it.groupby(res, lambda p: p[0])
-            )
+            img_and_weight_per_tag = dict((tag, list(tiw)) for tag, tiw in it.groupby(res, lambda p: p[0]))
 
-            tag_dim = max(image_ids_per_tag.keys()) + 1
+            tag_dim = max(img_and_weight_per_tag.keys()) + 1
             emb_dim = self.EMBEDDING_VEC_LEN
 
-            if self._torch is not None:
-                self._tag_embeddings = self._torch.zeros(
-                    (tag_dim, emb_dim), dtype=embeddings.dtype, device=embeddings.device
-                )
-            else:
-                self._tag_embeddings = np.zeros((tag_dim, emb_dim))
+            self._tag_embeddings = self._zeros((tag_dim, emb_dim))
 
-            for tag, image_ids in image_ids_per_tag.items():
-                self._tag_embeddings[tag] = embeddings[image_ids].sum(0)
+            for tag, tiw in img_and_weight_per_tag.items():
+                image_ids = list(i for _t, i, _w in tiw)
+                weights = list(w for _t, _i, w in tiw)
+
+                weights = self._tensor(weights).unsqueeze(1)
+
+                self._tag_embeddings[tag] = (embeddings[image_ids] * weights).sum(0)
 
         return self._tag_embeddings
 
@@ -190,63 +235,21 @@ class Database:
 
     def image_tags(self, id: int):
         cur = self.execute(self.SELECT_IMAGE_TAGS, (id,))
-        tags = tuple(tag for (tag,) in cur)
+        return tuple(cur)
 
-        return tags
-
-    def image_add_tag(self, image_id: int, tag: str):
+    def image_set_tag_weight(self, image_id: int, tag: str, weight=1.0):
         with self._db:
             self._db.execute(self.INSERT_TAG, (tag,))
-            self._db.execute(self.INSERT_TAG_IMAGE, (image_id, tag))
+            self._db.execute(self.INSERT_TAG_IMAGE, {"image": image_id, "label": tag, "weight": weight})
 
         # TODO: update the embeddings right here by adding the image embeddings
         # _if_ the tag was not already on the image before.
-        self._tag_embeddings = None
-
-    def image_remove_tag(self, image_id: int, tag: str):
-        self.execute(self.DELETE_TAG_IMAGE, (image_id, tag))
-
-        # TODO: update the embeddings right here by subtracting the image embeddings
-        # _if_ the tag was on the image before.
         self._tag_embeddings = None
 
     def image_count(self):
         (count,) = self.execute(self.SELECT_IMAGE_COUNT).fetchone()
 
         return count
-
-    def _norm(self, a, dim, eps=1e-6):
-        norm = (
-            np.linalg.norm(a, axis=dim, keepdim=True)
-            if self._torch is None
-            else self._torch.norm(a, dim=dim, keepdim=True)
-        )
-        norm += eps
-
-        return norm
-
-    def _cosine_similarity(self, a, b):
-        res = a @ b
-
-        res /= self._norm(a, -1)
-        res /= self._norm(b, -2)
-
-        return res
-
-    def _top_k(self, x, top_k):
-        if self._torch is not None:
-            top_values, top_indices = self._torch.topk(x, top_k)
-        else:
-            sorted_indices = np.argsort(x)
-            top_indices = sorted_indices[-top_k:]
-            top_values = x[top_indices]
-
-        top_values = top_values.tolist()
-        top_indices = top_indices.tolist()
-
-        pairs = tuple(zip(top_indices, top_values))
-
-        return pairs
 
     def tags_similar(self, id):
         embeddings = self.embeddings_mmap()
@@ -272,7 +275,6 @@ class Database:
         return list((id_to_name[idx], val) for idx, val in zip(indices, values) if idx in id_to_name)
 
     def images_similar_to_tags(self, tags: list[str], top_k=1000):
-        print(tags)
         tag_ids = list(self.execute(self.SELECT_TAG_ID, (tag,)).fetchone()[0] for tag in tags)
 
         embeddings = self.embeddings_mmap()

@@ -2,10 +2,16 @@
 
 var pic = null;
 
-function tag_span(image_id, tag_name, action) {
+function tag_span(image_id, tag_name, weight, action) {
+  weight = Math.min(Math.max(weight, -1), 1);
+  weight = (1 - weight) / 2;
+
+  let hue = Math.floor(147 * (1 - weight));
+
   let span = document.createElement("span");
   span.innerText = tag_name;
   span.className = "tag";
+  span.style.backgroundColor = `hsl(${hue}, 100%, 50%)`;
 
   if (action === "add") {
     span.onclick = (ev) => add_tag_to_image(image_id, tag_name, ev.target);
@@ -16,32 +22,41 @@ function tag_span(image_id, tag_name, action) {
   return span;
 }
 
-async function remove_tag_from_image(image_id, tag_name, span_elem) {
+async function set_tag_weight(image_id, tag_name, weight, span_elem) {
+  const content = { weight: weight };
+  const body = JSON.stringify(content);
+
+  const headers = new Headers();
+  headers.append("Content-Type", "application/json");
+
   // TODO: handle response
   await fetch(`/img/${image_id}/tags/current/${tag_name}`, {
-    method: "DELETE",
+    method: "PUT",
+    body: body,
+    headers: headers,
   });
 
-  document
-    .getElementById("tags-suggested")
-    .appendChild(tag_span(pic.id, tag_name, "add"));
+  if (weight === 0) {
+    document
+      .getElementById("tags-suggested")
+      .appendChild(tag_span(pic.id, tag_name, 0, "add"));
+  } else {
+    document
+      .getElementById("tags-added")
+      .appendChild(tag_span(pic.id, tag_name, 1, "remove"));
+  }
 
   if (span_elem !== null) {
     span_elem.remove();
   }
 }
 
+async function remove_tag_from_image(image_id, tag_name, span_elem) {
+  await set_tag_weight(image_id, tag_name, 0, span_elem);
+}
+
 async function add_tag_to_image(image_id, tag_name, span_elem) {
-  // TODO: handle response
-  await fetch(`/img/${image_id}/tags/current/${tag_name}`, { method: "PUT" });
-
-  document
-    .getElementById("tags-added")
-    .appendChild(tag_span(pic.id, tag_name, "remove"));
-
-  if (span_elem !== null) {
-    span_elem.remove();
-  }
+  await set_tag_weight(image_id, tag_name, 1, span_elem);
 }
 
 function filter_suggested_tags(filter) {
@@ -106,8 +121,10 @@ async function load_image(id) {
   let tags_added_div = document.getElementById("tags-added");
   tags_added_div.querySelectorAll(".tag").forEach((tag) => tag.remove());
 
-  for (let tag_name of pic.tags.current) {
-    tags_added_div.appendChild(tag_span(pic.id, tag_name, "remove"));
+  for (let name_and_weight of pic.tags.current) {
+    let name = name_and_weight[0];
+    let weight = name_and_weight[1];
+    tags_added_div.appendChild(tag_span(pic.id, name, weight, "remove"));
   }
 
   // Tags that other images have
@@ -116,7 +133,10 @@ async function load_image(id) {
 
   for (let tag_name_and_similarity of pic.tags.available.reverse()) {
     let tag_name = tag_name_and_similarity[0];
-    tags_suggested_div.appendChild(tag_span(pic.id, tag_name, "add"));
+    let similarity = tag_name_and_similarity[1];
+    tags_suggested_div.appendChild(
+      tag_span(pic.id, tag_name, similarity, "add"),
+    );
   }
 
   // Apply the text filter on the suggested tags
