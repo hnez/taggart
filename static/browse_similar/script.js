@@ -2,7 +2,7 @@
 
 var pic = null;
 
-function tag_span(image_id, tag_name, weight, action) {
+function tag_span(image_id, tag_name, weight, where) {
   weight = Math.min(Math.max(weight, -1), 1);
   weight = (1 - weight) / 2;
 
@@ -13,10 +13,11 @@ function tag_span(image_id, tag_name, weight, action) {
   span.className = "tag";
   span.style.backgroundColor = `hsl(${hue}, 100%, 50%)`;
 
-  if (action === "add") {
-    span.onclick = (ev) => add_tag_to_image(image_id, tag_name, ev.target);
+  if (where === "suggested") {
+    span.onclick = (ev) =>
+      set_tag_weight(image_id, tag_name, ev.shiftKey ? -1 : 1, ev.target);
   } else {
-    span.onclick = (ev) => remove_tag_from_image(image_id, tag_name, ev.target);
+    span.onclick = (ev) => set_tag_weight(image_id, tag_name, 0, ev.target)
   }
 
   return span;
@@ -39,24 +40,16 @@ async function set_tag_weight(image_id, tag_name, weight, span_elem) {
   if (weight === 0) {
     document
       .getElementById("tags-suggested")
-      .appendChild(tag_span(pic.id, tag_name, 0, "add"));
+      .appendChild(tag_span(pic.id, tag_name, 0, "suggested"));
   } else {
     document
       .getElementById("tags-added")
-      .appendChild(tag_span(pic.id, tag_name, 1, "remove"));
+      .appendChild(tag_span(pic.id, tag_name, weight, "added"));
   }
 
   if (span_elem !== null) {
     span_elem.remove();
   }
-}
-
-async function remove_tag_from_image(image_id, tag_name, span_elem) {
-  await set_tag_weight(image_id, tag_name, 0, span_elem);
-}
-
-async function add_tag_to_image(image_id, tag_name, span_elem) {
-  await set_tag_weight(image_id, tag_name, 1, span_elem);
 }
 
 function filter_suggested_tags(filter) {
@@ -124,7 +117,7 @@ async function load_image(id) {
   for (let name_and_weight of pic.tags.current) {
     let name = name_and_weight[0];
     let weight = name_and_weight[1];
-    tags_added_div.appendChild(tag_span(pic.id, name, weight, "remove"));
+    tags_added_div.appendChild(tag_span(pic.id, name, weight, "added"));
   }
 
   // Tags that other images have
@@ -134,8 +127,13 @@ async function load_image(id) {
   for (let tag_name_and_similarity of pic.tags.available.reverse()) {
     let tag_name = tag_name_and_similarity[0];
     let similarity = tag_name_and_similarity[1];
+
+    if (pic.tags.current.find((nw) => nw[0] == tag_name) !== undefined) {
+      continue
+    }
+
     tags_suggested_div.appendChild(
-      tag_span(pic.id, tag_name, similarity, "add"),
+      tag_span(pic.id, tag_name, similarity, "suggested"),
     );
   }
 
@@ -154,7 +152,8 @@ async function init() {
   );
   tags_textbox.addEventListener("keyup", (ev) => {
     if (ev.key === "Enter") {
-      add_tag_to_image(pic.id, ev.target.value, null);
+      let name = ev.target.value.trim();
+      set_tag_weight(pic.id, name, 1, null);
       ev.target.value = "";
       filter_suggested_tags("");
     }
