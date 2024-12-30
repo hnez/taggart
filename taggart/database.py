@@ -26,12 +26,12 @@ class Database:
             broken INTEGER NOT NULL DEFAULT 0
         ) STRICT""",
         """CREATE TABLE IF NOT EXISTS tags (
-            label TEXT NOT NULL UNIQUE,
-            weight REAL NOT NULL DEFAULT 0
+            label TEXT NOT NULL UNIQUE
         ) STRICT""",
         """CREATE TABLE IF NOT EXISTS image_tags (
             image INTEGER REFERENCES images (rowid),
             tag INTEGER REFERENCES tags (rowid),
+            weight REAL NOT NULL DEFAULT 0,
             UNIQUE(image, tag)
         ) STRICT""",
         "CREATE INDEX IF NOT EXISTS image_tags_image ON image_tags (image)",
