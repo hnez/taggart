@@ -28,7 +28,7 @@ class Database:
         """CREATE TABLE IF NOT EXISTS tags (
             label TEXT NOT NULL UNIQUE
         ) STRICT""",
-        """CREATE TABLE IF NOT EXISTS rating_category (
+        """CREATE TABLE IF NOT EXISTS rating_categories (
             label TEXT NOT NULL UNIQUE
         ) STRICT""",
         """CREATE TABLE IF NOT EXISTS image_tags (
@@ -39,7 +39,7 @@ class Database:
         ) STRICT""",
         """CREATE TABLE IF NOT EXISTS image_rating (
             image INTEGER REFERENCES images (rowid),
-            category INTEGER REFERENCES rating_category (rowid),
+            category INTEGER REFERENCES rating_categories (rowid),
             rating INTEGER NOT NULL DEFAULT 0,
             UNIQUE(image, category)
         ) STRICT""",
@@ -51,7 +51,7 @@ class Database:
 
     INSERT_IMAGES = "INSERT OR IGNORE INTO images (path, ts_added) VALUES (?, unixepoch())"
     INSERT_TAG = "INSERT OR IGNORE INTO tags (label) VALUES (?)"
-    INSERT_RATING_CATEGORY = "INSERT OR IGNORE INTO rating_category (label) VALUES (?)"
+    INSERT_RATING_CATEGORY = "INSERT OR IGNORE INTO rating_categories (label) VALUES (?)"
     INSERT_TAG_IMAGE = """INSERT INTO image_tags (image, tag, weight)
         SELECT :image, rowid, :weight FROM tags WHERE label == :label
         ON CONFLICT DO UPDATE SET weight=:weight"""
@@ -64,14 +64,17 @@ class Database:
         WHERE image_tags.image == ? AND weight != 0"""
     SELECT_IMAGE_COUNT = "SELECT COUNT(*) FROM images"
     SELECT_TAGS = "SELECT DISTINCT label, rowid FROM tags"
-    SELECT_TAGS_BY_OCCURRENCE = """SELECT label, COUNT(image) AS occurrences FROM image_tags
+    SELECT_TAGS_WITH_OCCURRENCE = """SELECT label, COUNT(image) FROM image_tags
         INNER JOIN tags ON image_tags.tag == tags.rowid
         WHERE weight != 0
-        GROUP BY tag
-        ORDER BY occurrences DESC;
-    """
+        GROUP BY tag"""
+    SELECT_RATING_CATEGORIES = "SELECT DISTINCT label, rowid FROM rating_categories"
     SELECT_TAG_ID = "SELECT rowid FROM tags WHERE label == ?"
     SELECT_ALL_TAG_IMAGE_WEIGHTS = "SELECT tag, image, weight FROM image_tags ORDER BY tag"
+
+    SELECT_IMAGE_RATINGS = """SELECT label, rating FROM image_rating
+        INNER JOIN rating_categories ON image_rating.category == rating_categories.rowid
+        WHERE image_rating.image == ?"""
 
     UPDATE_META = """UPDATE images SET
         file_size = :file_size,
@@ -83,7 +86,7 @@ class Database:
       WHERE rowid == :id"""
     UPDATE_HAS_EMBEDDING = "UPDATE images SET has_embedding = TRUE WHERE rowid == ?"
     UPDATE_RATING = """INSERT INTO image_rating (image, category, rating)
-        SELECT :image, rowid, :rating FROM rating_category WHERE label == :label
+        SELECT :image, rowid, :rating FROM rating_categories WHERE label == :label
         ON CONFLICT DO UPDATE SET rating=:rating"""
 
     RE_IMAGE_EXT = re.compile(r"(?i)\.(?:png$)|(?:jpe?g$)")
@@ -247,8 +250,10 @@ class Database:
         return path
 
     def image_tags(self, id: int):
-        cur = self.execute(self.SELECT_IMAGE_TAGS, (id,))
-        return tuple(cur)
+        return dict(self.execute(self.SELECT_IMAGE_TAGS, (id,)))
+
+    def image_ratings(self, id: int):
+        return dict(self.execute(self.SELECT_IMAGE_RATINGS, (id,)))
 
     def image_set_tag_weight(self, image_id: int, tag: str, weight=1.0):
         with self._db:
@@ -264,7 +269,7 @@ class Database:
 
         with self._db:
             self._db.execute(self.INSERT_RATING_CATEGORY, (category,))
-            self._db.execute(self.INSERT_TAG_IMAGE, {"image": image_id, "label": category, "rating": rating})
+            self._db.execute(self.UPDATE_RATING, {"image": image_id, "label": category, "rating": rating})
 
     def image_count(self):
         (count,) = self.execute(self.SELECT_IMAGE_COUNT).fetchone()
@@ -280,19 +285,9 @@ class Database:
         image_emb = image_emb.unsqueeze(0).unsqueeze(-1)
 
         cosine_similarities = self._cosine_similarity(tag_emb, image_emb).squeeze(-2, -1)
+        cosine_similarities = cosine_similarities.tolist()
 
-        id_to_name = dict((id, name) for name, id in self.tags().items())
-
-        if self._torch is not None:
-            values, indices = self._torch.sort(cosine_similarities)
-        else:
-            indices = np.argsort(cosine_similarities)
-            values = cosine_similarities[indices]
-
-        values = values.tolist()
-        indices = indices.tolist()
-
-        return list((id_to_name[idx], val) for idx, val in zip(indices, values) if idx in id_to_name)
+        return dict((name, cosine_similarities[index]) for name, index in self.tags().items())
 
     def images_similar_to_tags(self, tags: list[str], top_k=1000):
         tag_ids = list(self.execute(self.SELECT_TAG_ID, (tag,)).fetchone()[0] for tag in tags)
@@ -323,11 +318,14 @@ class Database:
 
         return self._top_k(cosine_similarities, top_k)
 
+    def rating_categories(self):
+        return dict(self.execute(self.SELECT_RATING_CATEGORIES))
+
     def tags(self):
         return dict(self.execute(self.SELECT_TAGS))
 
-    def tags_by_occurrence(self):
-        return list(self.execute(self.SELECT_TAGS_BY_OCCURRENCE))
+    def tags_with_occurrence(self):
+        return dict(self.execute(self.SELECT_TAGS_WITH_OCCURRENCE))
 
     def update_meta(
         self, id: int, is_broken: bool, file_size: int, width: int, height: int, exif_camera: str, exif_ts: int
