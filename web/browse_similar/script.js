@@ -1,6 +1,24 @@
 "use strict";
 
-var pic = null;
+async function get_json(url) {
+  const response = await fetch(url);
+  const result = await response.json();
+
+  return result;
+}
+
+async function put_json(url, content) {
+  const body = JSON.stringify(content);
+
+  const headers = new Headers();
+  headers.append("Content-Type", "application/json");
+
+  await fetch(url, {
+    method: "PUT",
+    body: body,
+    headers: headers,
+  });
+}
 
 function tag_span(image_id, tag_name, weight, where) {
   weight = Math.min(Math.max(weight, -1), 1);
@@ -17,39 +35,15 @@ function tag_span(image_id, tag_name, weight, where) {
     span.onclick = (ev) =>
       set_tag_weight(image_id, tag_name, ev.shiftKey ? -1 : 1, ev.target);
   } else {
-    span.onclick = (ev) => set_tag_weight(image_id, tag_name, 0, ev.target)
+    span.onclick = (ev) => set_tag_weight(image_id, tag_name, 0, ev.target);
   }
 
   return span;
 }
 
 async function set_tag_weight(image_id, tag_name, weight, span_elem) {
-  const content = { weight: weight };
-  const body = JSON.stringify(content);
-
-  const headers = new Headers();
-  headers.append("Content-Type", "application/json");
-
-  // TODO: handle response
-  await fetch(`/img/${image_id}/tags/current/${tag_name}`, {
-    method: "PUT",
-    body: body,
-    headers: headers,
-  });
-
-  if (weight === 0) {
-    document
-      .getElementById("tags-suggested")
-      .appendChild(tag_span(pic.id, tag_name, 0, "suggested"));
-  } else {
-    document
-      .getElementById("tags-added")
-      .appendChild(tag_span(pic.id, tag_name, weight, "added"));
-  }
-
-  if (span_elem !== null) {
-    span_elem.remove();
-  }
+  await put_json(`/images/${image_id}/tags/${tag_name}`, { assigned: weight });
+  await populate_tag_editor(image_id);
 }
 
 function filter_suggested_tags(filter) {
@@ -68,82 +62,121 @@ function filter_suggested_tags(filter) {
   }
 }
 
-async function load_image(id) {
-  // Download the image metadata
-  const response = await fetch(`/img/${id}.json`);
-  pic = await response.json();
+async function populate_tag_editor(id) {
+  const tags = await get_json(`/images/${id}/tags`);
 
-  // Populate the main image
-  document.getElementById("main").src = `/img/${pic.id}.jpg`;
+  const tags_assigned_pos = [];
+  const tags_assigned_neg = [];
+  const tags_estimated = [];
+
+  for (const [name, meta] of Object.entries(tags)) {
+    meta["name"] = name;
+
+    if ("assigned" in meta) {
+      if (meta["assigned"] > 0) tags_assigned_pos.push(meta);
+      if (meta["assigned"] < 0) tags_assigned_neg.push(meta);
+      continue;
+    }
+
+    if ("estimated" in meta) {
+      tags_estimated.push(meta);
+    }
+  }
+
+  tags_assigned_pos.sort((a, b) => a["name"] > b["name"]);
+  tags_assigned_neg.sort((a, b) => a["name"] > b["name"]);
+
+  tags_estimated.sort((a, b) => a["estimated"] < b["estimated"]);
+
+  document
+    .getElementById("tags-assigned-positive")
+    .replaceChildren(
+      ...tags_assigned_pos.map((meta) =>
+        tag_span(id, meta.name, meta.assigned, "assigned"),
+      ),
+    );
+
+  document
+    .getElementById("tags-assigned-negative")
+    .replaceChildren(
+      ...tags_assigned_neg.map((meta) =>
+        tag_span(id, meta.name, meta.assigned, "assigned"),
+      ),
+    );
+
+  document
+    .getElementById("tags-suggested")
+    .replaceChildren(
+      ...tags_estimated.map((meta) =>
+        tag_span(id, meta.name, meta.estimated, "suggested"),
+      ),
+    );
+}
+
+function roster_img_elem(id) {
+  let img = document.createElement("img");
+  img.className = "roster-element";
+  img.src = `/images/${id}.jpg`;
+
+  let a = document.createElement("a");
+  a.href = `#${id}`;
+  a.appendChild(img);
+
+  return a;
+}
+
+async function populate_roster(id) {
+  const roster_elem = document.getElementById("roster");
+
+  const neighbors = await get_json(`/images/${id}/neighbors`);
 
   // Populate the roster of other images
   // Start with the next, previous, a shuffled next and shuffled previous
   // image.
-  var roster = [
-    pic.serial_prev,
-    pic.serial_next,
-    pic.shuffle_prev,
-    pic.shuffle_next,
-  ];
+  roster_elem.replaceChildren(
+    roster_img_elem(neighbors.serial_prev),
+    roster_img_elem(neighbors.serial_next),
+    roster_img_elem(neighbors.shuffle_prev),
+    roster_img_elem(neighbors.shuffle_next),
+  );
 
   // Then add images that the server deemed similar to this one.
-  // From most to least similar (the server sends them in ascending order).
+  // This is a slow operation, hence why we do the two roster updated
+  // in two steps.
+  const similar = await get_json(`/images/${id}/similar`);
 
-  for (let idx_sim of pic.similar.reverse()) {
-    roster.push(idx_sim[0]);
+  for (let idx_sim of similar.images.reverse()) {
+    roster_elem.appendChild(roster_img_elem(idx_sim[0]));
   }
+}
 
-  var imgs = [];
+async function load_image(id) {
+  // Populate the main image
+  document.getElementById("main").src = `/images/${id}.jpg`;
 
-  for (let idx of roster) {
-    let img = document.createElement("img");
-    img.className = "roster-element";
-    img.src = `/img/${idx}.jpg`;
-
-    let a = document.createElement("a");
-    a.href = `#${idx}`;
-    a.appendChild(img);
-
-    imgs.push(a);
-  }
-
-  document.getElementById("roster").replaceChildren(...imgs);
-
-  // Update the tag editor
-  // Tags that are currently stored in the database for this image
-  let tags_added_div = document.getElementById("tags-added");
-  tags_added_div.querySelectorAll(".tag").forEach((tag) => tag.remove());
-
-  for (let name_and_weight of pic.tags.current) {
-    let name = name_and_weight[0];
-    let weight = name_and_weight[1];
-    tags_added_div.appendChild(tag_span(pic.id, name, weight, "added"));
-  }
-
-  // Tags that other images have
-  let tags_suggested_div = document.getElementById("tags-suggested");
-  tags_suggested_div.querySelectorAll(".tag").forEach((tag) => tag.remove());
-
-  for (let tag_name_and_similarity of pic.tags.available.reverse()) {
-    let tag_name = tag_name_and_similarity[0];
-    let similarity = tag_name_and_similarity[1];
-
-    if (pic.tags.current.find((nw) => nw[0] == tag_name) !== undefined) {
-      continue
-    }
-
-    tags_suggested_div.appendChild(
-      tag_span(pic.id, tag_name, similarity, "suggested"),
-    );
-  }
-
-  // Apply the text filter on the suggested tags
-  let tags_textbox = document.getElementById("tags-textbox");
-  filter_suggested_tags(tags_textbox.value);
+  await populate_tag_editor(id);
+  await populate_roster(id);
 }
 
 async function init() {
   console.log("OK let's go!");
+
+  var image_id = 1;
+
+  // Set the initial image based on the URL anchor (if there is one).
+  if (window.location.hash) {
+    const hash = window.location.hash;
+    image_id = Number(hash.substring(1));
+  }
+
+  // Change the active image based on the current URL hash value
+  window.addEventListener("hashchange", (ev) => {
+    const url = URL.parse(ev.newURL);
+    const hash = url.hash;
+    image_id = Number(hash.substring(1));
+
+    load_image(image_id);
+  });
 
   // Make the tag textbox interactive
   let tags_textbox = document.getElementById("tags-textbox");
@@ -152,29 +185,13 @@ async function init() {
   );
   tags_textbox.addEventListener("keyup", (ev) => {
     if (ev.key === "Enter") {
-      let name = ev.target.value.trim();
-      set_tag_weight(pic.id, name, 1, null);
+      let name = ev.target.value.trim().toLowerCase();
+
+      set_tag_weight(image_id, name, 1, null);
       ev.target.value = "";
       filter_suggested_tags("");
     }
   });
 
-  // Change the active image based on the current URL hash value
-  window.addEventListener("hashchange", (ev) => {
-    const url = URL.parse(ev.newURL);
-    const hash = url.hash;
-    const idx = Number(hash.substring(1));
-
-    load_image(idx);
-  });
-
-  // Select the initial image based on the initial URL hash value
-  let initial_image = 1;
-
-  if (window.location.hash) {
-    const hash = window.location.hash;
-    initial_image = Number(hash.substring(1));
-  }
-
-  await load_image(initial_image);
+  await load_image(image_id);
 }

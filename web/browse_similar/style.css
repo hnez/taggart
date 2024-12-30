@@ -33,7 +33,7 @@ body {
   margin: 0.3%;
 }
 
-#tags-added {
+#tags-assigned {
   padding: 0.6em;
   border-bottom: 2px solid #0000000f;
   min-height: 20%;
@@ -41,32 +41,23 @@ body {
 
 #tags-textbox-wrap {
   padding: 0.6em;
-  border-bottom: 2px solid #00000045;
 }
 
 #tags-textbox {
-  width: 100%;
+  width: 10em;
+
+  padding: 0.3em;
+  margin: 0.1em;
+
+  border-radius: 0.3em;
+  box-shadow: 0 0 0.3em #00000054;
+  background-color: hsl(147, 100%, 50%);
 }
 
 #tags-suggested {
   padding: 0.6em;
   border-bottom: 2px solid #00000045;
   min-height: 20%;
-}
-
-#tags-added h1 {
-  margin-bottom: 0.2em;
-  font-size: 1.6em;
-}
-
-#tags-textbox-wrap h1 {
-  margin-bottom: 0.2em;
-  font-size: 1.6em;
-}
-
-#tags-suggested h1 {
-  margin-bottom: 0.2em;
-  font-size: 1.6em;
 }
 
 #tags-editor {
