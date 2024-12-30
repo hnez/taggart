@@ -25,7 +25,7 @@ class Server:
         self.app = bottle.Bottle()
 
         for route, filename in self.STATIC_ROUTES:
-            self.app.get(route, callback=functools.partial(bottle.static_file, filename, "static"))
+            self.app.get(route, callback=functools.partial(bottle.static_file, filename, "web"))
 
         self.app.get("/img/<id:int>.json", callback=self.get_image_info)
         self.app.get("/img/<id:int>.jpg", callback=self.get_image_file)
