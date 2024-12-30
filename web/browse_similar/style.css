@@ -15,13 +15,40 @@ body {
 }
 
 .tag {
-  padding: 0.3em;
   margin: 0.1em;
+  display: inline-flex;
+  align-items: center;
+  border: 2px solid #ccc;
+  border-radius: 8px;
+  overflow: hidden;
+  text-decoration: none;
+  font-family: sans-serif;
+}
 
-  border-radius: 0.3em;
-  box-shadow: 0 0 0.3em #00000054;
+.tag-label {
+  padding: 7px 7px;
+  text-align: center;
+  white-space: nowrap;
+  min-width: 2em;
+}
 
-  display: inline-block;
+.tag-detail {
+  background-color: #eae3ae;
+  padding: 10.5px 10.5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-left: 2px solid #ccc;
+  text-decoration: none;
+  font-size: 0.7em;
+}
+
+.tag-label:hover {
+  text-decoration: underline;
+}
+
+.tag-detail:hover {
+  background-color: #fdea56;
 }
 
 .tag.hidden {
@@ -34,37 +61,23 @@ body {
 }
 
 #tags-assigned {
-  padding: 0.6em;
-  border-bottom: 2px solid #0000000f;
   min-height: 20%;
+  border-bottom: 2px solid #0000000f;
+  padding-bottom: 0.3em;
+  margin-bottom: 0.6em;
 }
 
 #tags-textbox-wrap {
-  padding: 0.6em;
-}
-
-#tags-textbox {
-  width: 10em;
-
-  padding: 0.3em;
-  margin: 0.1em;
-
-  border-radius: 0.3em;
-  box-shadow: 0 0 0.3em #00000054;
-  background-color: hsl(147, 100%, 50%);
-}
-
-#tags-suggested {
-  padding: 0.6em;
-  border-bottom: 2px solid #00000045;
-  min-height: 20%;
+  border-bottom: 2px solid #0000000f;
+  padding-bottom: 0.3em;
+  margin-bottom: 0.6em;
 }
 
 #tags-editor {
   background-color: #f3f2ef;
   height: 62%;
   width: 20%;
-  padding: 1em;
+  padding: 1.6em;
   overflow: scroll;
 
   position: absolute;

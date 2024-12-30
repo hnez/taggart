@@ -1,44 +1,36 @@
 "use strict";
 
-async function get_json(url) {
-  const response = await fetch(url);
-  const result = await response.json();
+import { get_json, put_json } from "/common.js";
 
-  return result;
-}
-
-async function put_json(url, content) {
-  const body = JSON.stringify(content);
-
-  const headers = new Headers();
-  headers.append("Content-Type", "application/json");
-
-  await fetch(url, {
-    method: "PUT",
-    body: body,
-    headers: headers,
-  });
-}
-
-function tag_span(image_id, tag_name, weight, where) {
+function tag_elem(image_id, tag_name, weight, where) {
   weight = Math.min(Math.max(weight, -1), 1);
   weight = (1 - weight) / 2;
 
-  let hue = Math.floor(147 * (1 - weight));
+  const hue = Math.floor(147 * (1 - weight));
 
-  let span = document.createElement("span");
-  span.innerText = tag_name;
-  span.className = "tag";
-  span.style.backgroundColor = `hsl(${hue}, 100%, 50%)`;
+  const label = document.createElement("span");
+  label.className = "tag-label";
+  label.innerText = tag_name;
+  label.style.backgroundColor = `hsl(${hue}, 100%, 50%)`;
 
   if (where === "suggested") {
-    span.onclick = (ev) =>
+    label.onclick = (ev) =>
       set_tag_weight(image_id, tag_name, ev.shiftKey ? -1 : 1, ev.target);
   } else {
-    span.onclick = (ev) => set_tag_weight(image_id, tag_name, 0, ev.target);
+    label.onclick = (ev) => set_tag_weight(image_id, tag_name, 0, ev.target);
   }
 
-  return span;
+  const detail = document.createElement("a");
+  detail.className = "tag-detail";
+  detail.innerText = "🔍";
+  detail.href = `/browse_tags/#${tag_name}`;
+
+  const tag = document.createElement("span");
+  tag.className = "tag";
+  tag.appendChild(label);
+  tag.appendChild(detail);
+
+  return tag;
 }
 
 async function set_tag_weight(image_id, tag_name, weight, span_elem) {
@@ -47,17 +39,17 @@ async function set_tag_weight(image_id, tag_name, weight, span_elem) {
 }
 
 function filter_suggested_tags(filter) {
-  let tags_suggested_div = document.getElementById("tags-suggested");
-  let tags = tags_suggested_div.querySelectorAll(".tag");
+  const tags_suggested_div = document.getElementById("tags-suggested");
+  const tags = tags_suggested_div.querySelectorAll(".tag");
 
-  for (let tag_span of tags) {
-    let tag_name = tag_span.innerText;
-    let hide = !tag_name.includes(filter);
+  for (const tag_elem of tags) {
+    const tag_name = tag_elem.innerText;
+    const hide = !tag_name.includes(filter);
 
-    tag_span.classList.remove("hidden");
+    tag_elem.classList.remove("hidden");
 
     if (hide) {
-      tag_span.classList.add("hidden");
+      tag_elem.classList.add("hidden");
     }
   }
 }
@@ -92,7 +84,7 @@ async function populate_tag_editor(id) {
     .getElementById("tags-assigned-positive")
     .replaceChildren(
       ...tags_assigned_pos.map((meta) =>
-        tag_span(id, meta.name, meta.assigned, "assigned"),
+        tag_elem(id, meta.name, meta.assigned, "assigned"),
       ),
     );
 
@@ -100,7 +92,7 @@ async function populate_tag_editor(id) {
     .getElementById("tags-assigned-negative")
     .replaceChildren(
       ...tags_assigned_neg.map((meta) =>
-        tag_span(id, meta.name, meta.assigned, "assigned"),
+        tag_elem(id, meta.name, meta.assigned, "assigned"),
       ),
     );
 
@@ -108,17 +100,17 @@ async function populate_tag_editor(id) {
     .getElementById("tags-suggested")
     .replaceChildren(
       ...tags_estimated.map((meta) =>
-        tag_span(id, meta.name, meta.estimated, "suggested"),
+        tag_elem(id, meta.name, meta.estimated, "suggested"),
       ),
     );
 }
 
 function roster_img_elem(id) {
-  let img = document.createElement("img");
+  const img = document.createElement("img");
   img.className = "roster-element";
   img.src = `/images/${id}.jpg`;
 
-  let a = document.createElement("a");
+  const a = document.createElement("a");
   a.href = `#${id}`;
   a.appendChild(img);
 
@@ -145,7 +137,7 @@ async function populate_roster(id) {
   // in two steps.
   const similar = await get_json(`/images/${id}/similar`);
 
-  for (let idx_sim of similar.images.reverse()) {
+  for (const idx_sim of similar.images.reverse()) {
     roster_elem.appendChild(roster_img_elem(idx_sim[0]));
   }
 }
@@ -158,10 +150,10 @@ async function load_image(id) {
   await populate_roster(id);
 }
 
-async function init() {
+async function main() {
   console.log("OK let's go!");
 
-  var image_id = 1;
+  let image_id = 1;
 
   // Set the initial image based on the URL anchor (if there is one).
   if (window.location.hash) {
@@ -179,13 +171,13 @@ async function init() {
   });
 
   // Make the tag textbox interactive
-  let tags_textbox = document.getElementById("tags-textbox");
+  const tags_textbox = document.getElementById("tags-textbox");
   tags_textbox.addEventListener("input", (ev) =>
     filter_suggested_tags(ev.target.value),
   );
   tags_textbox.addEventListener("keyup", (ev) => {
     if (ev.key === "Enter") {
-      let name = ev.target.value.trim().toLowerCase();
+      const name = ev.target.value.trim().toLowerCase();
 
       set_tag_weight(image_id, name, 1, null);
       ev.target.value = "";
@@ -195,3 +187,5 @@ async function init() {
 
   await load_image(image_id);
 }
+
+window.addEventListener("load", main);

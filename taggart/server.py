@@ -12,6 +12,7 @@ class Server:
         ("/", "index.html"),
         ("/style.css", "style.css"),
         ("/spinner.gif", "spinner.gif"),
+        ("/common.js", "common.js"),
         ("/browse_similar/", "browse_similar/index.html"),
         ("/browse_similar/script.js", "browse_similar/script.js"),
         ("/browse_similar/style.css", "browse_similar/style.css"),

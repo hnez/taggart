@@ -1,10 +1,10 @@
 <html>
   <head>
     <link rel="stylesheet" href="./style.css" />
-    <script src="./script.js"></script>
+    <script src="./script.js" type="module"></script>
   </head>
 
-  <body onload="init()">
+  <body>
     <img id="main" src="/spinner.gif" />
     <div id="tags-editor">
       <h1>Tags</h1>
@@ -13,7 +13,10 @@
         <div id="tags-assigned-negative"></div>
       </div>
       <div id="tags-textbox-wrap">
-        <input id="tags-textbox" type="text" />
+        <span class="tag">
+          <input class="tag-label" id="tags-textbox" type="text" />
+          <span class="tag-detail">+</span>
+        </span>
       </div>
       <div id="tags-suggested"></div>
     </div>

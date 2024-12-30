@@ -1,7 +1,9 @@
 "use strict";
 
-var images = null;
-var page_elements = [];
+import { get_json } from "/common.js";
+
+let images = [];
+let page_elements = [];
 
 function get_filter() {
   const hash = window.location.hash;
@@ -21,8 +23,8 @@ function populate_filter_elem() {
   const filter_elem = document.getElementById("tags-filter");
   filter_elem.innerHTML = "";
 
-  for (let tag_name of tags) {
-    let span = document.createElement("span");
+  for (const tag_name of tags) {
+    const span = document.createElement("span");
     span.innerText = tag_name;
     span.className = "tag";
     span.onclick = (_ev) => remove_tag_from_filter(tag_name);
@@ -37,7 +39,7 @@ function set_filter(tags) {
 }
 
 function add_tag_to_filter(tag_name) {
-  let tags = get_filter();
+  const tags = get_filter();
 
   if (tags.includes(tag_name)) {
     return;
@@ -49,7 +51,7 @@ function add_tag_to_filter(tag_name) {
 }
 
 function remove_tag_from_filter(tag_name) {
-  let tags = get_filter();
+  const tags = get_filter();
   const tag_index = tags.indexOf(tag_name);
 
   if (tag_index < 0) {
@@ -62,30 +64,28 @@ function remove_tag_from_filter(tag_name) {
 }
 
 async function load_tag_list() {
-  const response = await fetch(`/tags.json`);
-  const json = await response.json();
-  const tags = json.tags;
+  const tags = await get_json("/tags");
 
-  const available_elem = document.getElementById("tags-available");
+  const tag_elems = Object.entries(tags)
+    .toSorted((nma, nmb) => nma[1]["occurrences"] < nmb[1]["occurrences"])
+    .map((name_meta) => {
+      const tag = name_meta[0];
+      const span = document.createElement("span");
+      span.innerText = tag;
+      span.className = "tag";
+      span.onclick = (_ev) => add_tag_to_filter(tag);
 
-  available_elem.innerHTML = "";
+      return span;
+    });
 
-  for (let tag of tags) {
-    let tag_name = tag[0];
-
-    let span = document.createElement("span");
-    span.innerText = tag_name;
-    span.className = "tag";
-    span.onclick = (_ev) => add_tag_to_filter(tag_name);
-
-    available_elem.appendChild(span);
-  }
+  document.getElementById("tags-available").replaceChildren(...tag_elems);
 }
 
 async function load_image_list(filter) {
   if (filter) {
-    const response = await fetch(`/tag/${filter}/images/by_embedding.json`);
-    const json = await response.json();
+    const json = await get_json(
+      `/tags/${filter}/images?assigned=false&estimated=true`,
+    );
 
     images = json.images;
   } else {
@@ -105,17 +105,17 @@ function populate_page(page_div, images) {
     return;
   }
 
-  for (let img_sim of images) {
-    let idx = img_sim[0];
+  for (const image of images) {
+    const id = image.id;
 
-    let img = document.createElement("img");
-    img.src = `/img/${idx}.jpg`;
+    const img = document.createElement("img");
+    img.src = `/images/${id}.jpg`;
 
-    let a = document.createElement("a");
-    a.href = `/browse_similar/#${idx}`;
+    const a = document.createElement("a");
+    a.href = `/browse_similar/#${id}`;
     a.appendChild(img);
 
-    let tile = document.createElement("div");
+    const tile = document.createElement("div");
     tile.className = "tile";
     tile.appendChild(a);
 
@@ -124,10 +124,10 @@ function populate_page(page_div, images) {
 }
 
 function handle_scroll(_ev) {
-  let upper_page = Math.floor(window.scrollY / window.innerHeight);
-  let lower_page = upper_page + 1;
+  const upper_page = Math.floor(window.scrollY / window.innerHeight);
+  const lower_page = upper_page + 1;
 
-  let num_pages = Math.floor((images.length + 5) / 6);
+  const num_pages = Math.floor((images.length + 5) / 6);
 
   while (page_elements.length > num_pages) {
     page_elements.pop().remove();
@@ -136,7 +136,7 @@ function handle_scroll(_ev) {
   let pages_elem = document.getElementById("pages");
 
   while (page_elements.length < num_pages) {
-    let div = document.createElement("div");
+    const div = document.createElement("div");
     div.className = "page";
 
     pages_elem.appendChild(div);
@@ -150,8 +150,8 @@ function handle_scroll(_ev) {
     }
   }
 
-  let images_upper = images.slice(upper_page * 6, (upper_page + 1) * 6);
-  let images_lower = images.slice(lower_page * 6, (lower_page + 1) * 6);
+  const images_upper = images.slice(upper_page * 6, (upper_page + 1) * 6);
+  const images_lower = images.slice(lower_page * 6, (lower_page + 1) * 6);
 
   if (images_upper.length > 0) {
     populate_page(page_elements[upper_page], images_upper);
@@ -162,7 +162,7 @@ function handle_scroll(_ev) {
   }
 }
 
-async function init() {
+async function main() {
   console.log("OK let's go!");
 
   // Change the active tag based on the current URL hash value
@@ -185,5 +185,7 @@ async function init() {
     populate_filter_elem();
   }
 
-  load_tag_list();
+  await load_tag_list();
 }
+
+window.addEventListener("load", main);
