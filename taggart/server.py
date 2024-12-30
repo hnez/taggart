@@ -29,10 +29,14 @@ class Server:
 
         self.app.get("/img/<id:int>.json", callback=self.get_image_info)
         self.app.get("/img/<id:int>.jpg", callback=self.get_image_file)
-        self.app.put("/img/<id:int>/tags/current/<name>", callback=self.set_image_tag)
+        self.app.put("/img/<id:int>/tags/current/<tag>", callback=self.set_image_tag)
+        self.app.put("/img/<id:int>/ratings/<category>", callback=self.set_image_rating)
 
         self.app.get("/tags.json", callback=self.get_tags)
         self.app.get("/tag/<filter>/images/by_embedding.json", callback=self.get_images_by_tag_embedding)
+
+    def _clean_tag_name(self, name):
+        return name.strip().lower()
 
     def run(self, *kargs, **kwargs):
         self.app.run(*kargs, **kwargs)
@@ -68,11 +72,19 @@ class Server:
 
         return bottle.static_file(path, "/")
 
-    def set_image_tag(self, id: int, name: str):
+    def set_image_tag(self, id: int, tag: str):
         req = bottle.request.json
+        tag = self._clean_tag_name(tag)
         weight = req.get("weight", 1)
 
-        self.db.image_set_tag_weight(id, name.strip().lower(), weight)
+        self.db.image_set_tag_weight(id, tag, weight)
+
+    def set_image_rating(self, id: int, category: str):
+        req = bottle.request.json
+        category = self._clean_tag_name(category)
+        rating = req["rating"]
+
+        self.db.image_set_rating(id, category, rating)
 
     def get_tags(self):
         tags = self.db.tags_by_occurrence()

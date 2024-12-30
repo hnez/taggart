@@ -28,11 +28,20 @@ class Database:
         """CREATE TABLE IF NOT EXISTS tags (
             label TEXT NOT NULL UNIQUE
         ) STRICT""",
+        """CREATE TABLE IF NOT EXISTS rating_category (
+            label TEXT NOT NULL UNIQUE
+        ) STRICT""",
         """CREATE TABLE IF NOT EXISTS image_tags (
             image INTEGER REFERENCES images (rowid),
             tag INTEGER REFERENCES tags (rowid),
             weight REAL NOT NULL DEFAULT 0,
             UNIQUE(image, tag)
+        ) STRICT""",
+        """CREATE TABLE IF NOT EXISTS image_rating (
+            image INTEGER REFERENCES images (rowid),
+            category INTEGER REFERENCES rating_category (rowid),
+            rating INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(image, category)
         ) STRICT""",
         "CREATE INDEX IF NOT EXISTS image_tags_image ON image_tags (image)",
         "CREATE INDEX IF NOT EXISTS image_tags_tag ON image_tags (tag)",
@@ -42,6 +51,7 @@ class Database:
 
     INSERT_IMAGES = "INSERT OR IGNORE INTO images (path, ts_added) VALUES (?, unixepoch())"
     INSERT_TAG = "INSERT OR IGNORE INTO tags (label) VALUES (?)"
+    INSERT_RATING_CATEGORY = "INSERT OR IGNORE INTO rating_category (label) VALUES (?)"
     INSERT_TAG_IMAGE = """INSERT INTO image_tags (image, tag, weight)
         SELECT :image, rowid, :weight FROM tags WHERE label == :label
         ON CONFLICT DO UPDATE SET weight=:weight"""
@@ -72,6 +82,9 @@ class Database:
         broken = :is_broken
       WHERE rowid == :id"""
     UPDATE_HAS_EMBEDDING = "UPDATE images SET has_embedding = TRUE WHERE rowid == ?"
+    UPDATE_RATING = """INSERT INTO image_rating (image, category, rating)
+        SELECT :image, rowid, :rating FROM rating_category WHERE label == :label
+        ON CONFLICT DO UPDATE SET rating=:rating"""
 
     RE_IMAGE_EXT = re.compile(r"(?i)\.(?:png$)|(?:jpe?g$)")
 
@@ -245,6 +258,13 @@ class Database:
         # TODO: update the embeddings right here by adding the image embeddings
         # _if_ the tag was not already on the image before.
         self._tag_embeddings = None
+
+    def image_set_rating(self, image_id: int, category: str, rating: int):
+        assert rating in range(6)
+
+        with self._db:
+            self._db.execute(self.INSERT_RATING_CATEGORY, (category,))
+            self._db.execute(self.INSERT_TAG_IMAGE, {"image": image_id, "label": category, "rating": rating})
 
     def image_count(self):
         (count,) = self.execute(self.SELECT_IMAGE_COUNT).fetchone()
