@@ -193,7 +193,7 @@ class Database:
 
             img_and_weight_per_tag = dict((tag, list(tiw)) for tag, tiw in it.groupby(res, lambda p: p[0]))
 
-            tag_dim = max(img_and_weight_per_tag.keys()) + 1
+            tag_dim = max(img_and_weight_per_tag.keys(), default=0) + 1
             emb_dim = self.EMBEDDING_VEC_LEN
 
             self._tag_embeddings = self._zeros((tag_dim, emb_dim))
