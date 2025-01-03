@@ -10,7 +10,7 @@ function tag_elem(image_id, tag_name, weight, where) {
 
   const label = document.createElement("span");
   label.className = "tag-label";
-  label.innerText = tag_name;
+  label.textContent = tag_name;
   label.style.backgroundColor = `hsl(${hue}, 100%, 50%)`;
 
   if (where === "suggested") {
@@ -22,13 +22,13 @@ function tag_elem(image_id, tag_name, weight, where) {
 
   const detail = document.createElement("a");
   detail.className = "tag-detail";
-  detail.innerText = "🔍";
+  detail.textContent = "🔍";
   detail.href = `/browse_tags/#${tag_name}`;
 
   const tag = document.createElement("span");
   tag.className = "tag";
-  tag.appendChild(label);
-  tag.appendChild(detail);
+  tag.append(label);
+  tag.append(detail);
 
   return tag;
 }
@@ -38,12 +38,14 @@ async function set_tag_weight(image_id, tag_name, weight, span_elem) {
   await populate_tag_editor(image_id);
 }
 
-function filter_suggested_tags(filter) {
-  const tags_suggested_div = document.getElementById("tags-suggested");
+function filter_suggested_tags() {
+  const textbox_elem = document.querySelector("#tags-textbox");
+  const filter = textbox_elem.value.toLowerCase().trim();
+  const tags_suggested_div = document.querySelector("#tags-suggested");
   const tags = tags_suggested_div.querySelectorAll(".tag");
 
   for (const tag_elem of tags) {
-    const tag_name = tag_elem.innerText;
+    const tag_name = tag_elem.textContent;
     const hide = !tag_name.includes(filter);
 
     tag_elem.classList.remove("hidden");
@@ -81,7 +83,7 @@ async function populate_tag_editor(id) {
   tags_estimated.sort((a, b) => a["estimated"] < b["estimated"]);
 
   document
-    .getElementById("tags-assigned-positive")
+    .querySelector("#tags-assigned-positive")
     .replaceChildren(
       ...tags_assigned_pos.map((meta) =>
         tag_elem(id, meta.name, meta.assigned, "assigned"),
@@ -89,7 +91,7 @@ async function populate_tag_editor(id) {
     );
 
   document
-    .getElementById("tags-assigned-negative")
+    .querySelector("#tags-assigned-negative")
     .replaceChildren(
       ...tags_assigned_neg.map((meta) =>
         tag_elem(id, meta.name, meta.assigned, "assigned"),
@@ -97,12 +99,14 @@ async function populate_tag_editor(id) {
     );
 
   document
-    .getElementById("tags-suggested")
+    .querySelector("#tags-suggested")
     .replaceChildren(
       ...tags_estimated.map((meta) =>
         tag_elem(id, meta.name, meta.estimated, "suggested"),
       ),
     );
+
+  filter_suggested_tags();
 }
 
 function roster_img_elem(id) {
@@ -112,13 +116,13 @@ function roster_img_elem(id) {
 
   const a = document.createElement("a");
   a.href = `#${id}`;
-  a.appendChild(img);
+  a.append(img);
 
   return a;
 }
 
 async function populate_roster(id) {
-  const roster_elem = document.getElementById("roster");
+  const roster_elem = document.querySelector("#roster");
 
   const neighbors = await get_json(`/images/${id}/neighbors`);
 
@@ -138,13 +142,13 @@ async function populate_roster(id) {
   const similar = await get_json(`/images/${id}/similar`);
 
   for (const idx_sim of similar.images.reverse()) {
-    roster_elem.appendChild(roster_img_elem(idx_sim[0]));
+    roster_elem.append(roster_img_elem(idx_sim[0]));
   }
 }
 
 async function load_image(id) {
   // Populate the main image
-  document.getElementById("main").src = `/images/${id}.jpg`;
+  document.querySelector("#main").src = `/images/${id}.jpg`;
 
   await populate_tag_editor(id);
   await populate_roster(id);
@@ -158,30 +162,29 @@ async function main() {
   // Set the initial image based on the URL anchor (if there is one).
   if (window.location.hash) {
     const hash = window.location.hash;
-    image_id = Number(hash.substring(1));
+    image_id = Number(hash.slice(1));
   }
 
   // Change the active image based on the current URL hash value
   window.addEventListener("hashchange", (ev) => {
     const url = URL.parse(ev.newURL);
     const hash = url.hash;
-    image_id = Number(hash.substring(1));
+    image_id = Number(hash.slice(1));
 
     load_image(image_id);
   });
 
   // Make the tag textbox interactive
-  const tags_textbox = document.getElementById("tags-textbox");
-  tags_textbox.addEventListener("input", (ev) =>
-    filter_suggested_tags(ev.target.value),
-  );
+  const tags_textbox = document.querySelector("#tags-textbox");
+  tags_textbox.addEventListener("input", (ev) => filter_suggested_tags());
   tags_textbox.addEventListener("keyup", (ev) => {
     if (ev.key === "Enter") {
       const name = ev.target.value.trim().toLowerCase();
 
-      set_tag_weight(image_id, name, 1, null);
+      set_tag_weight(image_id, name, 1, undefined);
       ev.target.value = "";
-      filter_suggested_tags("");
+
+      filter_suggested_tags();
     }
   });
 

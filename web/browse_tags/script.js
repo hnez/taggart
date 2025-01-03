@@ -2,9 +2,6 @@
 
 import { get_json } from "/common.js";
 
-let images = [];
-let page_elements = [];
-
 function get_filter() {
   const hash = window.location.hash;
 
@@ -12,7 +9,7 @@ function get_filter() {
     return [];
   }
 
-  const tags = hash.substring(1).split("+").map(decodeURIComponent);
+  const tags = hash.slice(1).split("+").map(decodeURIComponent);
 
   return tags;
 }
@@ -20,16 +17,16 @@ function get_filter() {
 function populate_filter_elem() {
   const tags = get_filter();
 
-  const filter_elem = document.getElementById("tags-filter");
+  const filter_elem = document.querySelector("#tags-filter");
   filter_elem.innerHTML = "";
 
   for (const tag_name of tags) {
     const span = document.createElement("span");
-    span.innerText = tag_name;
+    span.textContent = tag_name;
     span.className = "tag";
     span.onclick = (_ev) => remove_tag_from_filter(tag_name);
 
-    filter_elem.appendChild(span);
+    filter_elem.append(span);
   }
 }
 
@@ -54,7 +51,7 @@ function remove_tag_from_filter(tag_name) {
   const tags = get_filter();
   const tag_index = tags.indexOf(tag_name);
 
-  if (tag_index < 0) {
+  if (tag_index === -1) {
     return;
   }
 
@@ -71,95 +68,59 @@ async function load_tag_list() {
     .map((name_meta) => {
       const tag = name_meta[0];
       const span = document.createElement("span");
-      span.innerText = tag;
+      span.textContent = tag;
       span.className = "tag";
       span.onclick = (_ev) => add_tag_to_filter(tag);
 
       return span;
     });
 
-  document.getElementById("tags-available").replaceChildren(...tag_elems);
+  document.querySelector("#tags-available").replaceChildren(...tag_elems);
 }
 
 async function load_image_list(filter) {
+  let images = [];
+
   if (filter) {
     const json = await get_json(
       `/tags/${filter}/images?assigned=false&estimated=true`,
     );
 
     images = json.images;
-  } else {
-    images = [];
   }
 
-  // Invalidate the current page content
-  page_elements.forEach((el) => el.remove());
-  page_elements = [];
+  const page_elems = [];
 
-  handle_scroll();
-}
+  for (let i = 0; ; i += 1) {
+    const page_images = images.slice(i * 6, (i + 1) * 6);
 
-function populate_page(page_div, images) {
-  if (page_div.childElementCount !== 0) {
-    // The page is already populated
-    return;
-  }
+    if (page_images.length === 0) break;
 
-  for (const image of images) {
-    const id = image.id;
+    const page_elem = document.createElement("div");
+    page_elem.className = "page";
 
-    const img = document.createElement("img");
-    img.src = `/images/${id}.jpg`;
+    for (const image of page_images) {
+      const id = image.id;
 
-    const a = document.createElement("a");
-    a.href = `/browse_similar/#${id}`;
-    a.appendChild(img);
+      const img = document.createElement("img");
+      img.src = `/images/${id}.jpg`;
+      img.loading = "lazy";
 
-    const tile = document.createElement("div");
-    tile.className = "tile";
-    tile.appendChild(a);
+      const a = document.createElement("a");
+      a.href = `/browse_similar/#${id}`;
+      a.append(img);
 
-    page_div.appendChild(tile);
-  }
-}
+      const tile = document.createElement("div");
+      tile.className = "tile";
+      tile.append(a);
 
-function handle_scroll(_ev) {
-  const upper_page = Math.floor(window.scrollY / window.innerHeight);
-  const lower_page = upper_page + 1;
-
-  const num_pages = Math.floor((images.length + 5) / 6);
-
-  while (page_elements.length > num_pages) {
-    page_elements.pop().remove();
-  }
-
-  let pages_elem = document.getElementById("pages");
-
-  while (page_elements.length < num_pages) {
-    const div = document.createElement("div");
-    div.className = "page";
-
-    pages_elem.appendChild(div);
-    page_elements.push(div);
-  }
-
-  for (let page = 0; page < page_elements.length; page++) {
-    // Clear all pages that are not currently on screen
-    if (page != upper_page && page != lower_page) {
-      page_elements[page].replaceChildren();
+      page_elem.append(tile);
     }
+
+    page_elems.push(page_elem);
   }
 
-  const images_upper = images.slice(upper_page * 6, (upper_page + 1) * 6);
-  const images_lower = images.slice(lower_page * 6, (lower_page + 1) * 6);
-
-  if (images_upper.length > 0) {
-    populate_page(page_elements[upper_page], images_upper);
-  }
-
-  if (images_lower.length > 0) {
-    populate_page(page_elements[lower_page], images_lower);
-  }
+  document.querySelector("#pages").replaceChildren(...page_elems);
 }
 
 async function main() {
@@ -169,17 +130,14 @@ async function main() {
   window.addEventListener("hashchange", (ev) => {
     const url = URL.parse(ev.newURL);
     const hash = url.hash;
-    const filter = hash.substring(1);
+    const filter = hash.slice(1);
 
     load_image_list(filter);
   });
 
-  // Load and unload images based on scroll position
-  window.addEventListener("scroll", handle_scroll);
-
   if (window.location.hash) {
     const hash = window.location.hash;
-    const filter = hash.substring(1);
+    const filter = hash.slice(1);
 
     load_image_list(filter);
     populate_filter_elem();

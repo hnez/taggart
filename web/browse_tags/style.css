@@ -9,15 +9,12 @@ body {
   font-size: 20px;
 }
 
-img {
-  /* TODO */
-  width: 400px;
-}
-
 .page {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   grid-template-rows: repeat(2, 1fr);
+
+  position: relative;
 
   width: 100%;
   height: 100%;
@@ -37,9 +34,23 @@ img {
   border: 1px solid black;
 }
 
+.tile a {
+  position: absolute;
+  width: 30%;
+  height: 48%;
+}
+
+.tile img {
+  object-fit: contain;
+  width: 100%;
+  height: 100%;
+}
+
 #tags-header {
   position: fixed;
   width: 100%;
+
+  z-index: 1;
 
   background-color: #1a1a1a;
 }
@@ -60,4 +71,8 @@ img {
 
 #tags-available .tag {
   background-color: #ffffcf;
+}
+
+#pages {
+  padding-top: 8em;
 }
