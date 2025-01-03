@@ -71,6 +71,10 @@ class Database:
     SELECT_RATING_CATEGORIES = "SELECT DISTINCT label, rowid FROM rating_categories"
     SELECT_TAG_ID = "SELECT rowid FROM tags WHERE label == ?"
     SELECT_ALL_TAG_IMAGE_WEIGHTS = "SELECT tag, image, weight FROM image_tags ORDER BY tag"
+    SELECT_SHUFFLE_NEIGHBORS = """SELECT
+        (SELECT image FROM image_shuffle AS rev WHERE rev.rowid == fwd.rowid - 1),
+        (SELECT image FROM image_shuffle AS rev WHERE rev.rowid == fwd.rowid + 1)
+        FROM image_shuffle AS fwd WHERE fwd.image == ?""";
 
     SELECT_IMAGE_RATINGS = """SELECT label, rating FROM image_rating
         INNER JOIN rating_categories ON image_rating.category == rating_categories.rowid
@@ -236,12 +240,7 @@ class Database:
             print(f"Added {len(paths)} images from {dirpath}")
 
     def image_shuffle_neighbors(self, id: int):
-        # TODO: replace by some unreadable but elegant SQL magic
-        (rowid,) = self.execute("SELECT rowid FROM image_shuffle WHERE image == ?", (id,)).fetchone()
-        (prev_id,) = self.execute("SELECT image FROM image_shuffle WHERE rowid == ? - 1", (rowid,)).fetchone()
-        (next_id,) = self.execute("SELECT image FROM image_shuffle WHERE rowid == ? + 1", (rowid,)).fetchone()
-
-        return (prev_id, next_id)
+        return self.execute(self.SELECT_SHUFFLE_NEIGHBORS, (id,)).fetchone()
 
     def image_path(self, id: int):
         cur = self.execute(self.SELECT_IMAGE_PATHS, (id,))
