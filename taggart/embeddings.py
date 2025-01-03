@@ -4,15 +4,12 @@ import contextlib
 import os
 from datetime import datetime
 
+import PIL
 import torch
-from PIL import ExifTags, Image
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoModel, AutoProcessor
 
 from .database import Database
-
-BATCH_SIZE = 48
-NUM_WORKERS = 12
 
 
 class ImageDataset(Dataset):
@@ -49,7 +46,9 @@ class ImageDataset(Dataset):
             file_size = os.stat(path).st_size
 
         try:
-            image = Image.open(path)
+            image = PIL.Image.open(path)
+            image = PIL.ImageOps.exif_transpose(image)
+            image = image.convert("RGB")
             inputs = self.image_processor(images=image, return_tensors="pt")
 
             pixel_values = inputs["pixel_values"].squeeze(0)
@@ -59,11 +58,11 @@ class ImageDataset(Dataset):
 
             with contextlib.suppress(KeyError):
                 exif = image.getexif()
-                exif_camera = exif[ExifTags.Base.Model]
+                exif_camera = exif[PIL.ExifTags.Base.Model]
 
             with contextlib.suppress(KeyError, ValueError):
                 exif = image.getexif()
-                exif_ts_raw = exif[ExifTags.Base.DateTime]
+                exif_ts_raw = exif[PIL.ExifTags.Base.DateTime]
                 exif_ts_dt = datetime.strptime(exif_ts_raw, "%Y:%m:%d %H:%M:%S")
                 exif_ts = exif_ts_dt.timestamp()
 
@@ -100,22 +99,27 @@ def load_image_processor():
 
 
 @torch.no_grad
-def add_embeddings(db: Database):
+def add_embeddings(db: Database, batch_size: int, num_workers: int):
     image_processor = load_image_processor()
     dataset = ImageDataset(db, image_processor)
-    dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS)
+    dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers)
 
     vision_model = load_vision_model()
     vision_model.eval()
-    vision_model = vision_model.cuda()
+
+    if not db._cpu:
+        vision_model = vision_model.cuda()
 
     num_batches = len(dataloader)
 
     start_time = datetime.now()
 
     for batch, (image_ids, pixel_values) in enumerate(dataloader):
-        output = vision_model.forward(pixel_values.cuda())
-        embeddings = output["pooler_output"].cpu().numpy()
+        if not db._cpu:
+            pixel_values = pixel_values.cuda()
+
+        output = vision_model.forward(pixel_values)
+        embeddings = output["pooler_output"].cpu()
 
         for id, emb in zip(image_ids, embeddings):
             id = id.item()

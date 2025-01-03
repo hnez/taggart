@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 
 import contextlib
-import importlib
 import itertools as it
 import os
 import re
 import sqlite3
 
 import numpy as np
+import torch
 
 
 class Database:
@@ -74,8 +74,7 @@ class Database:
     SELECT_SHUFFLE_NEIGHBORS = """SELECT
         (SELECT image FROM image_shuffle AS rev WHERE rev.rowid == fwd.rowid - 1),
         (SELECT image FROM image_shuffle AS rev WHERE rev.rowid == fwd.rowid + 1)
-        FROM image_shuffle AS fwd WHERE fwd.image == ?""";
-
+        FROM image_shuffle AS fwd WHERE fwd.image == ?"""
     SELECT_IMAGE_RATINGS = """SELECT label, rating FROM image_rating
         INNER JOIN rating_categories ON image_rating.category == rating_categories.rowid
         WHERE image_rating.image == ?"""
@@ -95,40 +94,19 @@ class Database:
 
     RE_IMAGE_EXT = re.compile(r"(?i)\.(?:png$)|(?:jpe?g$)")
 
-    def __init__(self, path: str, use_torch=False):
+    def __init__(self, path: str, cpu=False):
         self._db = sqlite3.connect(path)
         self._embeddings_path = path.removesuffix(".db") + ".embeddings"
-        self._embeddings_mmap = None
+        self._embeddings_rw = None
+        self._embeddings_ro = None
         self._tag_embeddings = None
-        self._torch = None
-
-        if use_torch:
-            try:
-                self._torch = importlib.import_module("torch")
-            except ModuleNotFoundError:
-                print("Failed to import torch. Continuing without it.")
+        self._cpu = cpu
 
         for create in self.CREATE_TABLES:
             self.execute(create)
 
-    def _zeros(self, shape):
-        if self._torch is not None:
-            return self._torch.zeros(shape, device="cuda")
-        else:
-            return np.zeros(shape)
-
-    def _tensor(self, x: list):
-        if self._torch is not None:
-            return self._torch.tensor(x, device="cuda")
-        else:
-            return np.ndarray(x)
-
     def _norm(self, a, dim, eps=1e-6):
-        norm = (
-            np.linalg.norm(a, axis=dim, keepdim=True)
-            if self._torch is None
-            else self._torch.norm(a, dim=dim, keepdim=True)
-        )
+        norm = torch.norm(a, dim=dim, keepdim=True)
         norm += eps
 
         return norm
@@ -142,12 +120,7 @@ class Database:
         return res
 
     def _top_k(self, x, top_k):
-        if self._torch is not None:
-            top_values, top_indices = self._torch.topk(x, top_k)
-        else:
-            sorted_indices = np.argsort(x)
-            top_indices = sorted_indices[-top_k:]
-            top_values = x[top_indices]
+        top_values, top_indices = torch.topk(x, top_k)
 
         top_values = top_values.tolist()
         top_indices = top_indices.tolist()
@@ -156,8 +129,8 @@ class Database:
 
         return pairs
 
-    def embeddings_mmap(self):
-        if self._embeddings_mmap is None:
+    def embeddings_rw(self):
+        if self._embeddings_rw is None:
             bytes_per_elem = np.float32(0).itemsize
             elems_per_row = self.EMBEDDING_VEC_LEN
             bytes_per_row = bytes_per_elem * elems_per_row
@@ -181,17 +154,26 @@ class Database:
             shape = (current_size // bytes_per_row, elems_per_row)
 
             mmap = np.memmap(self._embeddings_path, np.float32, "r+", 0, shape)
+            mmap = torch.from_numpy(mmap)
 
-            if self._torch is not None:
-                mmap = self._torch.from_numpy(mmap).cuda()
+            self._embeddings_rw = mmap
 
-            self._embeddings_mmap = mmap
+        # Invalidate the read only copy of the tensor that may reside
+        # on the GPU.
+        self._embeddings_ro = None
 
-        return self._embeddings_mmap
+        return self._embeddings_rw
+
+    def embeddings_ro(self):
+        if self._embeddings_ro is None:
+            rw = self.embeddings_rw()
+            self._embeddings_ro = rw if self._cpu else rw.cuda()
+
+        return self._embeddings_ro
 
     def tag_embeddings(self):
         if self._tag_embeddings is None:
-            embeddings = self.embeddings_mmap()
+            embeddings = self.embeddings_ro()
 
             res = self.execute(self.SELECT_ALL_TAG_IMAGE_WEIGHTS)
 
@@ -200,13 +182,13 @@ class Database:
             tag_dim = max(img_and_weight_per_tag.keys(), default=0) + 1
             emb_dim = self.EMBEDDING_VEC_LEN
 
-            self._tag_embeddings = self._zeros((tag_dim, emb_dim))
+            self._tag_embeddings = torch.zeros((tag_dim, emb_dim), device=embeddings.device, dtype=embeddings.dtype)
 
             for tag, tiw in img_and_weight_per_tag.items():
                 image_ids = list(i for _t, i, _w in tiw)
                 weights = list(w for _t, _i, w in tiw)
 
-                weights = self._tensor(weights).unsqueeze(1)
+                weights = torch.tensor(weights, device=embeddings.device).unsqueeze(1)
 
                 self._tag_embeddings[tag] = (embeddings[image_ids] * weights).sum(0)
 
@@ -221,7 +203,8 @@ class Database:
             return self._db.executemany(*kargs, **kwargs)
 
     def add_images(self, paths: tuple[str]):
-        self._embeddings_mmap = None
+        self._embeddings_rw = None
+        self._embeddings_ro = None
 
         params = iter((path,) for path in paths)
         cur = self.executemany(self.INSERT_IMAGES, params)
@@ -276,7 +259,7 @@ class Database:
         return count
 
     def tags_similar(self, id):
-        embeddings = self.embeddings_mmap()
+        embeddings = self.embeddings_ro()
         image_emb = embeddings[id]
         tag_emb = self.tag_embeddings()
 
@@ -291,7 +274,7 @@ class Database:
     def images_similar_to_tags(self, tags: list[str], top_k=1000):
         tag_ids = list(self.execute(self.SELECT_TAG_ID, (tag,)).fetchone()[0] for tag in tags)
 
-        embeddings = self.embeddings_mmap()
+        embeddings = self.embeddings_ro()
         tag_embs = self.tag_embeddings()[tag_ids]
 
         embeddings = embeddings.unsqueeze(1).unsqueeze(2)
@@ -304,7 +287,7 @@ class Database:
         return self._top_k(cosine_similarities, top_k)
 
     def images_similar(self, image_id: int, top_k=10):
-        embeddings = self.embeddings_mmap()
+        embeddings = self.embeddings_ro()
         image_emb = embeddings[image_id]
 
         embeddings = embeddings.unsqueeze(-2)
@@ -343,11 +326,11 @@ class Database:
         )
 
     def update_embedding(self, id: int, embedding: np.ndarray):
-        embeddings = self.embeddings_mmap()
+        embeddings = self.embeddings_rw()
         embeddings[id] = embedding
 
         self.execute(self.UPDATE_HAS_EMBEDDING, (id,))
 
 
 if __name__ == "__main__":
-    db = Database("taggart.db", use_torch=True)
+    db = Database("taggart.db")
