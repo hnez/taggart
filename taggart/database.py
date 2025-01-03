@@ -1,13 +1,72 @@
 #!/usr/bin/env python3
 
 import contextlib
+import functools as ft
 import itertools as it
+import operator as op
 import os
 import re
 import sqlite3
 
 import numpy as np
 import torch
+
+
+class TensorFile:
+    def __init__(self, path: str, shape: tuple[int], cpu=False, dtype=np.float32):
+        self.path = path
+        self.shape = shape
+        self.cpu = cpu
+        self.dtype = dtype
+
+        self._rw = None
+        self._ro = None
+
+    def resize(self, shape):
+        assert shape[1:] == self.shape[1:]
+
+        if shape[0] > self.shape[0]:
+            self.shape = shape
+            self._rw = None
+            self._ro = None
+
+    def read_write(self):
+        if self._rw is None:
+            bytes_per_elem = self.dtype(0).itemsize
+            elems_per_row = ft.reduce(op.mul, self.shape[1:])
+            bytes_per_row = bytes_per_elem * elems_per_row
+
+            min_rows = self.shape[0]
+            min_size = min_rows * bytes_per_row
+
+            with contextlib.suppress(FileExistsError), open(self.path, "x") as fd:
+                fd.close()
+
+            current_size = os.stat(self.path).st_size
+
+            assert current_size % bytes_per_row == 0
+
+            if current_size < min_size:
+                os.truncate(self.path, min_size)
+                current_size = min_size
+
+            self.shape = (current_size // bytes_per_row, *self.shape[1:])
+
+            mmap = np.memmap(self.path, self.dtype, "r+", 0, self.shape)
+            self._rw = torch.from_numpy(mmap)
+
+        # Invalidate the read only copy of the tensor that may reside
+        # on the GPU.
+        self._ro = None
+
+        return self._rw
+
+    def read_only(self):
+        if self._ro is None:
+            rw = self.read_write()
+            self._ro = rw if self.cpu else rw.cuda()
+
+        return self._ro
 
 
 class Database:
@@ -96,14 +155,15 @@ class Database:
 
     def __init__(self, path: str, cpu=False):
         self._db = sqlite3.connect(path)
-        self._embeddings_path = path.removesuffix(".db") + ".embeddings"
-        self._embeddings_rw = None
-        self._embeddings_ro = None
         self._tag_embeddings = None
         self._cpu = cpu
 
         for create in self.CREATE_TABLES:
             self.execute(create)
+
+        embeddings_path = path.removesuffix(".db") + ".embeddings"
+
+        self._embeddings = TensorFile(embeddings_path, (self.image_count() + 1, self.EMBEDDING_VEC_LEN), cpu)
 
     def _norm(self, a, dim, eps=1e-6):
         norm = torch.norm(a, dim=dim, keepdim=True)
@@ -129,51 +189,9 @@ class Database:
 
         return pairs
 
-    def embeddings_rw(self):
-        if self._embeddings_rw is None:
-            bytes_per_elem = np.float32(0).itemsize
-            elems_per_row = self.EMBEDDING_VEC_LEN
-            bytes_per_row = bytes_per_elem * elems_per_row
-
-            # `+1` because sqlite3 rowids start at 1 and we just keep the first
-            # vector empty in order to not have to add and remove 1 all the time.
-            target_rows = self.image_count() + 1
-            target_size = target_rows * bytes_per_row
-
-            with contextlib.suppress(FileExistsError), open(self._embeddings_path, "x") as fd:
-                fd.close()
-
-            current_size = os.stat(self._embeddings_path).st_size
-
-            assert current_size % bytes_per_row == 0
-
-            if current_size < target_size:
-                os.truncate(self._embeddings_path, target_size)
-                current_size = target_size
-
-            shape = (current_size // bytes_per_row, elems_per_row)
-
-            mmap = np.memmap(self._embeddings_path, np.float32, "r+", 0, shape)
-            mmap = torch.from_numpy(mmap)
-
-            self._embeddings_rw = mmap
-
-        # Invalidate the read only copy of the tensor that may reside
-        # on the GPU.
-        self._embeddings_ro = None
-
-        return self._embeddings_rw
-
-    def embeddings_ro(self):
-        if self._embeddings_ro is None:
-            rw = self.embeddings_rw()
-            self._embeddings_ro = rw if self._cpu else rw.cuda()
-
-        return self._embeddings_ro
-
     def tag_embeddings(self):
         if self._tag_embeddings is None:
-            embeddings = self.embeddings_ro()
+            embeddings = self._embeddings.read_only()
 
             res = self.execute(self.SELECT_ALL_TAG_IMAGE_WEIGHTS)
 
@@ -203,11 +221,10 @@ class Database:
             return self._db.executemany(*kargs, **kwargs)
 
     def add_images(self, paths: tuple[str]):
-        self._embeddings_rw = None
-        self._embeddings_ro = None
-
         params = iter((path,) for path in paths)
         cur = self.executemany(self.INSERT_IMAGES, params)
+
+        self._embeddings.resize((self.image_count() + 1, self.EMBEDDING_VEC_LEN))
 
         return cur
 
@@ -259,7 +276,7 @@ class Database:
         return count
 
     def tags_similar(self, id):
-        embeddings = self.embeddings_ro()
+        embeddings = self._embeddings.read_only()
         image_emb = embeddings[id]
         tag_emb = self.tag_embeddings()
 
@@ -274,7 +291,7 @@ class Database:
     def images_similar_to_tags(self, tags: list[str], top_k=1000):
         tag_ids = list(self.execute(self.SELECT_TAG_ID, (tag,)).fetchone()[0] for tag in tags)
 
-        embeddings = self.embeddings_ro()
+        embeddings = self._embeddings.read_only()
         tag_embs = self.tag_embeddings()[tag_ids]
 
         embeddings = embeddings.unsqueeze(1).unsqueeze(2)
@@ -287,7 +304,7 @@ class Database:
         return self._top_k(cosine_similarities, top_k)
 
     def images_similar(self, image_id: int, top_k=10):
-        embeddings = self.embeddings_ro()
+        embeddings = self._embeddings.read_only()
         image_emb = embeddings[image_id]
 
         embeddings = embeddings.unsqueeze(-2)
@@ -326,7 +343,7 @@ class Database:
         )
 
     def update_embedding(self, id: int, embedding: np.ndarray):
-        embeddings = self.embeddings_rw()
+        embeddings = self._embeddings.read_write()
         embeddings[id] = embedding
 
         self.execute(self.UPDATE_HAS_EMBEDDING, (id,))
