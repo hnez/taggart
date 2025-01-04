@@ -10,6 +10,9 @@ import sqlite3
 
 import numpy as np
 import torch
+from PIL import Image
+
+from .preview_decoder import PreviewDecoder
 
 
 class TensorFile:
@@ -71,6 +74,7 @@ class TensorFile:
 
 class Database:
     EMBEDDING_VEC_LEN = 1152
+    LATENTS_SHAPE = (4, 79, 52)
 
     CREATE_TABLES = (
         """CREATE TABLE IF NOT EXISTS images (
@@ -82,6 +86,7 @@ class Database:
             exif_camera TEXT,
             exif_ts INT,
             has_embedding INTEGER NOT NULL DEFAULT 0,
+            has_latents INTEGER NOT NULL DEFAULT 0,
             broken INTEGER NOT NULL DEFAULT 0
         ) STRICT""",
         """CREATE TABLE IF NOT EXISTS tags (
@@ -137,6 +142,7 @@ class Database:
     SELECT_IMAGE_RATINGS = """SELECT label, rating FROM image_rating
         INNER JOIN rating_categories ON image_rating.category == rating_categories.rowid
         WHERE image_rating.image == ?"""
+    SELECT_HAS_LATENTS = "SELECT has_latents FROM images WHERE rowid == ?"
 
     UPDATE_META = """UPDATE images SET
         file_size = :file_size,
@@ -147,6 +153,7 @@ class Database:
         broken = :is_broken
       WHERE rowid == :id"""
     UPDATE_HAS_EMBEDDING = "UPDATE images SET has_embedding = TRUE WHERE rowid == ?"
+    UPDATE_HAS_LATENTS = "UPDATE images SET has_latents = TRUE WHERE rowid == ?"
     UPDATE_RATING = """INSERT INTO image_rating (image, category, rating)
         SELECT :image, rowid, :rating FROM rating_categories WHERE label == :label
         ON CONFLICT DO UPDATE SET rating=:rating"""
@@ -158,12 +165,15 @@ class Database:
         self._tag_embeddings = None
         self._cpu = cpu
 
+        self.preview_decoder = PreviewDecoder()
+
         for create in self.CREATE_TABLES:
             self.execute(create)
 
-        embeddings_path = path.removesuffix(".db") + ".embeddings"
+        base_path = path.removesuffix(".db")
 
-        self._embeddings = TensorFile(embeddings_path, (self.image_count() + 1, self.EMBEDDING_VEC_LEN), cpu)
+        self._embeddings = TensorFile(f"{base_path}.embeddings", (self.image_count() + 1, self.EMBEDDING_VEC_LEN), cpu)
+        self._latents = TensorFile(f"{base_path}.latents", (self.image_count() + 1, *self.LATENTS_SHAPE), cpu)
 
     def _norm(self, a, dim, eps=1e-6):
         norm = torch.norm(a, dim=dim, keepdim=True)
@@ -247,6 +257,26 @@ class Database:
         (path,) = cur.fetchone()
 
         return path
+
+    def latent_preview(self, id: int):
+        (has_latents,) = self.execute(self.SELECT_HAS_LATENTS, (id,)).fetchone()
+
+        if not has_latents:
+            return None
+
+        latents = self._latents.read_write()
+        latent = latents[id : id + 1]
+
+        output = self.preview_decoder.forward(latent)
+
+        output = output[0].transpose(0, -1).transpose(0, 1)
+
+        output = output * 127.5 + 127.5
+        output = output.clamp(0, 255).byte().numpy()
+
+        image = Image.fromarray(output)
+
+        return image
 
     def image_tags(self, id: int):
         return dict(self.execute(self.SELECT_IMAGE_TAGS, (id,)))
@@ -342,11 +372,17 @@ class Database:
             },
         )
 
-    def update_embedding(self, id: int, embedding: np.ndarray):
+    def update_embedding(self, id: int, embedding: torch.Tensor):
         embeddings = self._embeddings.read_write()
-        embeddings[id] = embedding
+        embeddings[id] = embedding.to(embeddings.device)
 
         self.execute(self.UPDATE_HAS_EMBEDDING, (id,))
+
+    def update_latent(self, id: int, latent: torch.Tensor):
+        latents = self._latents.read_write()
+        latents[id] = latent.to(latents.device)
+
+        self.execute(self.UPDATE_HAS_LATENTS, (id,))
 
 
 if __name__ == "__main__":

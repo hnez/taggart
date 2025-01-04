@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import functools
+import io
 
 import bottle
 
@@ -32,6 +33,7 @@ class Server:
 
         self.app.get("/images", callback=self.get_images)
         self.app.get("/images/<id:int>.jpg", callback=self.get_image_file)
+        self.app.get("/images/<id:int>/latent/preview.png", callback=self.get_latent_preview_file)
 
         self.app.get("/images/<id:int>/neighbors", callback=self.get_image_neighbors)
         self.app.get("/images/<id:int>/similar", callback=self.get_image_similar)
@@ -66,6 +68,20 @@ class Server:
         path = self.db.image_path(id)
 
         return bottle.static_file(path, "/")
+
+    def get_latent_preview_file(self, id: int):
+        image = self.db.latent_preview(id)
+
+        if image is None:
+            raise bottle.HTTPError(404, "Latents have not been generated for this image")
+
+        buf = io.BytesIO()
+        image.save(buf, "png")
+        buf.seek(0)
+
+        bottle.response.content_type = "image/png"
+
+        return buf
 
     def get_image_neighbors(self, id: int):
         count = self.db.image_count()

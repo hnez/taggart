@@ -29,6 +29,12 @@ def main():
         "--workers", type=int, default=10, help="Number of worker processes for decompressing images"
     )
 
+    latents_parser = subparsers.add_parser("latents", help="Run the latent generation process")
+    latents_parser.add_argument("--batch-size", type=int, default=16, help="Number of images to process at once")
+    latents_parser.add_argument(
+        "--workers", type=int, default=10, help="Number of worker processes for decompressing images"
+    )
+
     args = parser.parse_args()
 
     db = Database(args.database, cpu=args.cpu)
@@ -46,6 +52,11 @@ def main():
         from taggart.embeddings import add_embeddings
 
         add_embeddings(db, batch_size=args.batch_size, num_workers=args.workers)
+
+    elif args.command == "latents":
+        from taggart.latents import add_latents
+
+        add_latents(db, batch_size=args.batch_size, num_workers=args.workers)
 
 
 if __name__ == "__main__":

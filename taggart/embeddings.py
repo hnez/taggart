@@ -2,6 +2,7 @@
 
 import contextlib
 import os
+import sys
 from datetime import datetime
 
 import PIL
@@ -12,9 +13,7 @@ from transformers import AutoModel, AutoProcessor
 from .database import Database
 
 
-class ImageDataset(Dataset):
-    ZEROS = torch.zeros(3, 384, 384)
-
+class ImagesToEmbedDataset(Dataset):
     CREATE_TMP_TABLE = """CREATE TEMPORARY TABLE images_to_embed AS
         SELECT images.rowid AS image
         FROM images
@@ -35,7 +34,6 @@ class ImageDataset(Dataset):
         image_id, path = self.db.execute(self.SELECT_IMAGE, (index,)).fetchone()
 
         file_size = None
-        pixel_values = self.ZEROS
         broken = True
         width = None
         height = None
@@ -49,25 +47,28 @@ class ImageDataset(Dataset):
             image = PIL.Image.open(path)
             image = PIL.ImageOps.exif_transpose(image)
             image = image.convert("RGB")
-            inputs = self.image_processor(images=image, return_tensors="pt")
 
-            pixel_values = inputs["pixel_values"].squeeze(0)
             broken = False
             width = image.width
             height = image.height
 
-            with contextlib.suppress(KeyError):
-                exif = image.getexif()
-                exif_camera = exif[PIL.ExifTags.Base.Model]
-
-            with contextlib.suppress(KeyError, ValueError):
-                exif = image.getexif()
-                exif_ts_raw = exif[PIL.ExifTags.Base.DateTime]
-                exif_ts_dt = datetime.strptime(exif_ts_raw, "%Y:%m:%d %H:%M:%S")
-                exif_ts = exif_ts_dt.timestamp()
-
         except Exception as e:
-            print(f'Failed to load "{path}":', e)
+            print(f'Failed to load "{path}":', e, file=sys.stderr, flush=True)
+
+            image = PIL.Image.new("RGB", (1, 1))
+
+        inputs = self.image_processor(images=image, return_tensors="pt")
+        pixel_values = inputs["pixel_values"].squeeze(0)
+
+        with contextlib.suppress(KeyError):
+            exif = image.getexif()
+            exif_camera = exif[PIL.ExifTags.Base.Model]
+
+        with contextlib.suppress(KeyError, ValueError):
+            exif = image.getexif()
+            exif_ts_raw = exif[PIL.ExifTags.Base.DateTime]
+            exif_ts_dt = datetime.strptime(exif_ts_raw, "%Y:%m:%d %H:%M:%S")
+            exif_ts = exif_ts_dt.timestamp()
 
         self.db.update_meta(image_id, broken, file_size, width, height, exif_camera, exif_ts)
 
@@ -101,7 +102,7 @@ def load_image_processor():
 @torch.no_grad
 def add_embeddings(db: Database, batch_size: int, num_workers: int):
     image_processor = load_image_processor()
-    dataset = ImageDataset(db, image_processor)
+    dataset = ImagesToEmbedDataset(db, image_processor)
     dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers)
 
     vision_model = load_vision_model()
@@ -119,7 +120,7 @@ def add_embeddings(db: Database, batch_size: int, num_workers: int):
             pixel_values = pixel_values.cuda()
 
         output = vision_model.forward(pixel_values)
-        embeddings = output["pooler_output"].cpu()
+        embeddings = output["pooler_output"]
 
         for id, emb in zip(image_ids, embeddings):
             id = id.item()
