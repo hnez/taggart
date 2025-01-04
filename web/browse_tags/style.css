@@ -32,12 +32,7 @@ body {
 
 .tile {
   border: 1px solid black;
-}
-
-.tile a {
-  position: absolute;
-  width: 30%;
-  height: 48%;
+  overflow: hidden;
 }
 
 .tile img {

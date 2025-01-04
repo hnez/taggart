@@ -116,6 +116,7 @@ function roster_img_elem(id) {
   const img = document.createElement("img");
   img.className = "roster-element";
   img.src = `/images/${id}.jpg`;
+  img.loading = "lazy";
 
   const a = document.createElement("a");
   a.href = `#${id}`;

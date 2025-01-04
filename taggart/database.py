@@ -333,7 +333,7 @@ class Database:
 
         return self._top_k(cosine_similarities, top_k)
 
-    def images_similar(self, image_id: int, top_k=10):
+    def images_similar(self, image_id: int, top_k=100):
         embeddings = self._embeddings.read_only()
         image_emb = embeddings[image_id]
 
