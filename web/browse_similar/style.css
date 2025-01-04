@@ -60,17 +60,36 @@ body {
   margin: 0.3%;
 }
 
-#tags-assigned {
-  min-height: 20%;
-  border-bottom: 2px solid #0000000f;
-  padding-bottom: 0.3em;
-  margin-bottom: 0.6em;
+#latent-viewer {
+  background-color: #f3f2ef;
+  height: 13em;
+  width: 10em;
+  padding: 1.6em;
+
+  position: absolute;
+  top: 2em;
+  left: 0;
+
+  border-radius: 0 0.5em 0.5em 0;
 }
 
-#tags-textbox-wrap {
-  border-bottom: 2px solid #0000000f;
-  padding-bottom: 0.3em;
-  margin-bottom: 0.6em;
+#latent-image {
+  object-fit: contain;
+
+  height: 10em;
+  width: 10em;
+}
+
+#main {
+  position: absolute;
+  top: 0;
+  left: 50%;
+
+  height: 80vh;
+  width: 80vw;
+  object-fit: contain;
+
+  transform: translate(-50%, -0%);
 }
 
 #tags-editor {
@@ -87,16 +106,17 @@ body {
   border-radius: 0.5em 0 0 0.5em;
 }
 
-#main {
-  position: absolute;
-  top: 0;
-  left: 50%;
+#tags-assigned {
+  min-height: 20%;
+  border-bottom: 2px solid #0000000f;
+  padding-bottom: 0.3em;
+  margin-bottom: 0.6em;
+}
 
-  height: 80vh;
-  width: 80vw;
-  object-fit: contain;
-
-  transform: translate(-50%, -0%);
+#tags-textbox-wrap {
+  border-bottom: 2px solid #0000000f;
+  padding-bottom: 0.3em;
+  margin-bottom: 0.6em;
 }
 
 #roster {

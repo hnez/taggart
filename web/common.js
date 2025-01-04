@@ -14,8 +14,8 @@ export async function put_json(url, content) {
   headers.append("Content-Type", "application/json");
 
   await fetch(url, {
-    method: "PUT",
     body: body,
     headers: headers,
+    method: "PUT",
   });
 }

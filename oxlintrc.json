@@ -9,7 +9,16 @@
     "suspicious": "error",
     "nursery": "warn"
   },
+  "env": {
+    "browser": true
+  },
   "rules": {
+    "max-params": "allow",
+    "no-async-await": "allow",
+    "no-continue": "allow",
+    "no-magic-numbers": "allow",
+    "no-ternary": "allow",
+    "no-undefined": "allow",
     "yoda": "allow"
   }
 }

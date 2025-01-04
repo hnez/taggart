@@ -24,7 +24,7 @@ function populate_filter_elem() {
     const span = document.createElement("span");
     span.textContent = tag_name;
     span.className = "tag";
-    span.onclick = (_ev) => remove_tag_from_filter(tag_name);
+    span.addEventListener("click", (_ev) => remove_tag_from_filter(tag_name));
 
     filter_elem.append(span);
   }
@@ -70,7 +70,7 @@ async function load_tag_list() {
       const span = document.createElement("span");
       span.textContent = tag;
       span.className = "tag";
-      span.onclick = (_ev) => add_tag_to_filter(tag);
+      span.addEventListener("click", (_ev) => add_tag_to_filter(tag));
 
       return span;
     });
@@ -124,6 +124,7 @@ async function load_image_list(filter) {
 }
 
 async function main() {
+  // eslint-disable-next-line no-console
   console.log("OK let's go!");
 
   // Change the active tag based on the current URL hash value

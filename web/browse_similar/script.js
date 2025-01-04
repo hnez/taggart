@@ -14,10 +14,13 @@ function tag_elem(image_id, tag_name, weight, where) {
   label.style.backgroundColor = `hsl(${hue}, 100%, 50%)`;
 
   if (where === "suggested") {
-    label.onclick = (ev) =>
-      set_tag_weight(image_id, tag_name, ev.shiftKey ? -1 : 1, ev.target);
+    label.addEventListener("click", (ev) =>
+      set_tag_weight(image_id, tag_name, ev.shiftKey ? -1 : 1),
+    );
   } else {
-    label.onclick = (ev) => set_tag_weight(image_id, tag_name, 0, ev.target);
+    label.addEventListener("click", (_ev) =>
+      set_tag_weight(image_id, tag_name, 0),
+    );
   }
 
   const detail = document.createElement("a");
@@ -33,7 +36,7 @@ function tag_elem(image_id, tag_name, weight, where) {
   return tag;
 }
 
-async function set_tag_weight(image_id, tag_name, weight, span_elem) {
+async function set_tag_weight(image_id, tag_name, weight) {
   await put_json(`/images/${image_id}/tags/${tag_name}`, { assigned: weight });
   await populate_tag_editor(image_id);
 }
@@ -149,12 +152,15 @@ async function populate_roster(id) {
 async function load_image(id) {
   // Populate the main image
   document.querySelector("#main").src = `/images/${id}.jpg`;
+  document.querySelector("#latent-image").src =
+    `/images/${id}/latent/preview.png`;
 
   await populate_tag_editor(id);
   await populate_roster(id);
 }
 
 async function main() {
+  // eslint-disable-next-line no-console
   console.log("OK let's go!");
 
   let image_id = 1;
@@ -176,12 +182,12 @@ async function main() {
 
   // Make the tag textbox interactive
   const tags_textbox = document.querySelector("#tags-textbox");
-  tags_textbox.addEventListener("input", (ev) => filter_suggested_tags());
+  tags_textbox.addEventListener("input", (_ev) => filter_suggested_tags());
   tags_textbox.addEventListener("keyup", (ev) => {
     if (ev.key === "Enter") {
       const name = ev.target.value.trim().toLowerCase();
 
-      set_tag_weight(image_id, name, 1, undefined);
+      set_tag_weight(image_id, name, 1);
       ev.target.value = "";
 
       filter_suggested_tags();
