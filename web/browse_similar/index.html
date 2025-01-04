@@ -5,25 +5,33 @@
   </head>
 
   <body>
-    <div id="latent-viewer">
-      <h1>Latent</h1>
-      <img id="latent-image" src="/spinner.gif" />
-    </div>
-    <img id="main" src="/spinner.gif" />
-    <div id="tags-editor">
-      <h1>Tags</h1>
-      <div id="tags-assigned">
-        <div id="tags-assigned-positive"></div>
-        <div id="tags-assigned-negative"></div>
+    <div id="page">
+      <div id="pane-top">
+        <div id="pane-left">
+          <h1>Latent</h1>
+          <img id="latent-image" src="/spinner.gif" />
+        </div>
+        <div id="pane-center">
+          <img id="main" src="/spinner.gif" />
+        </div>
+        <div id="pane-right">
+          <h1>Tags</h1>
+          <div id="tags-assigned">
+            <div id="tags-assigned-positive"></div>
+            <div id="tags-assigned-negative"></div>
+          </div>
+          <div id="tags-textbox-wrap">
+            <span class="tag">
+              <input class="tag-label" id="tags-textbox" type="text" />
+              <span class="tag-detail">+</span>
+            </span>
+          </div>
+          <div id="tags-suggested"></div>
+        </div>
       </div>
-      <div id="tags-textbox-wrap">
-        <span class="tag">
-          <input class="tag-label" id="tags-textbox" type="text" />
-          <span class="tag-detail">+</span>
-        </span>
+      <div id="pane-bottom">
+        <div id="roster"></div>
       </div>
-      <div id="tags-suggested"></div>
     </div>
-    <div id="roster"></div>
   </body>
 </html>
