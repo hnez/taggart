@@ -17,9 +17,11 @@ class Database:
 
     CREATE_TABLES = (
         """CREATE TABLE IF NOT EXISTS images (
-            path TEXT NOT NULL UNIQUE,
-            ts_added INT NOT NULL,
+            path TEXT NOT NULL,
+            ts_added INT NOT NULL DEFAULT (unixepoch()),
             file_size INT,
+            crop_left INT NOT NULL DEFAULT 0,
+            crop_top INT NOT NULL DEFAULT 0,
             width INT,
             height INT,
             exif_camera TEXT,

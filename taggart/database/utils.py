@@ -3,6 +3,10 @@
 import torch
 
 
+def clamp(x, lower, upper):
+    return max(min(x, upper), lower)
+
+
 def norm(a, dim, eps=1e-6):
     norm = torch.norm(a, dim=dim, keepdim=True)
     norm += eps

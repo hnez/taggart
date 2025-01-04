@@ -7,7 +7,7 @@ from collections.abc import Iterable
 import torch
 from PIL import Image as PILImage
 
-from .utils import cosine_similarity, top_k
+from .utils import clamp, cosine_similarity, top_k
 
 
 class ImageTag:
@@ -67,8 +67,12 @@ class ImageTags:
 
 
 class Image:
+    INSERT_CROPPED = """INSERT INTO images (path, crop_left, crop_top, width, height)
+        SELECT path, crop_left + ?, crop_top + ?, ?, ?
+        FROM images WHERE rowid == ?"""
+
     SELECT_HAS_LATENTS = "SELECT has_latents FROM images WHERE rowid == ?"
-    SELECT_PATH = "SELECT path FROM images where rowid == ?"
+    SELECT_PATH_AND_CROP = "SELECT path, crop_left, crop_top, width, height FROM images where rowid == ?"
     SELECT_SHUFFLE_NEIGHBORS = """SELECT
         (SELECT image FROM image_shuffle AS rev WHERE rev.rowid == fwd.rowid - 1),
         (SELECT image FROM image_shuffle AS rev WHERE rev.rowid == fwd.rowid + 1)
@@ -83,12 +87,17 @@ class Image:
         exif_camera = :exif_camera,
         exif_ts = :exif_ts,
         broken = :is_broken
-      WHERE rowid == :id"""
+        WHERE rowid == :id"""
 
     def __init__(self, db, id: int):
         self._db = db
         self.id = id
         self.tags = ImageTags(self._db, self.id)
+
+    def cropped(self, left: int, top: int, width: int, height: int):
+        res = self._db.execute(self.INSERT_CROPPED, (left, top, width, height, self.id))
+
+        return Image(self._db, res.lastrowid)
 
     def latent_preview(self):
         (has_latents,) = self._db.execute(self.SELECT_HAS_LATENTS, (self.id,)).fetchone()
@@ -118,10 +127,27 @@ class Image:
 
         return (Image(self._db, pre), Image(self._db, nxt))
 
-    def path(self):
-        (path,) = self._db.execute(self.SELECT_PATH, (self.id,)).fetchone()
+    def read(self):
+        (path, crop_left, crop_top, width, height) = self._db.execute(self.SELECT_PATH_AND_CROP, (self.id,)).fetchone()
 
-        return path
+        pil = PILImage.open(path)
+
+        width = pil.width if width is None else width
+        height = pil.height if height is None else height
+
+        crop = (
+            clamp(crop_left, 0, width),
+            clamp(crop_top, 0, height),
+            clamp(crop_left + width, 0, width),
+            clamp(crop_top + height, 0, height),
+        )
+
+        no_crop = (0, 0, pil.width, pil.height)
+
+        if crop != no_crop:
+            pil = pil.crop(crop)
+
+        return pil
 
     def set_embedding(self, embedding: torch.Tensor):
         embeddings = self._db._embeddings.read_write()
@@ -183,7 +209,7 @@ class Image:
 
 
 class Images:
-    INSERT_IMAGE = "INSERT OR IGNORE INTO images (path, ts_added) VALUES (?, unixepoch())"
+    INSERT_IMAGE = "INSERT OR IGNORE INTO images (path) VALUES (?)"
 
     RE_IMAGE_EXT = re.compile(r"(?i)\.(?:png$)|(?:jpe?g$)")
 

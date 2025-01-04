@@ -54,6 +54,15 @@ class Server:
     def _split_tag_filter(self, filter):
         return tuple(self._clean_tag_name(tag) for tag in filter.split("+"))
 
+    def _serve_pil_image(self, pil, file_type="png"):
+        buf = io.BytesIO()
+        pil.save(buf, file_type)
+        buf.seek(0)
+
+        bottle.response.content_type = f"image/{file_type}"
+
+        return buf
+
     def run(self, *kargs, **kwargs):
         self.app.run(*kargs, **kwargs)
 
@@ -61,23 +70,19 @@ class Server:
         raise NotImplementedError
 
     def get_image_file(self, id: int):
-        path = self.db.images[id].path()
+        pil = self.db.images[id].read()
 
-        return bottle.static_file(path, "/")
+        pil.thumbnail((1024, 1024))
+
+        return self._serve_pil_image(pil, "jpeg")
 
     def get_latent_preview_file(self, id: int):
-        image = self.db.images[id].latent_preview()
+        pil = self.db.images[id].latent_preview()
 
-        if image is None:
+        if pil is None:
             raise bottle.HTTPError(404, "Latents have not been generated for this image")
 
-        buf = io.BytesIO()
-        image.save(buf, "png")
-        buf.seek(0)
-
-        bottle.response.content_type = "image/png"
-
-        return buf
+        return self._serve_pil_image(pil)
 
     def get_image_neighbors(self, id: int):
         image = self.db.images[id]
