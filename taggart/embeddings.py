@@ -18,7 +18,9 @@ class ImagesToEmbedDataset(Dataset):
         SELECT images.rowid AS image
         FROM images
         WHERE has_embedding == FALSE AND broken == FALSE"""
+
     DROP_TMP_TABLE = "DROP TABLE images_to_embed"
+
     SELECT_COUNT = "SELECT COUNT(*) FROM images_to_embed"
     SELECT_IMAGE = """SELECT images.rowid, path FROM images_to_embed
         INNER JOIN images ON images_to_embed.image == images.rowid
@@ -70,7 +72,7 @@ class ImagesToEmbedDataset(Dataset):
             exif_ts_dt = datetime.strptime(exif_ts_raw, "%Y:%m:%d %H:%M:%S")
             exif_ts = exif_ts_dt.timestamp()
 
-        self.db.update_meta(image_id, broken, file_size, width, height, exif_camera, exif_ts)
+        self.db.images[image_id].set_meta(broken, file_size, width, height, exif_camera, exif_ts)
 
         return (image_id, pixel_values)
 
@@ -124,7 +126,7 @@ def add_embeddings(db: Database, batch_size: int, num_workers: int):
 
         for id, emb in zip(image_ids, embeddings):
             id = id.item()
-            db.update_embedding(id, emb)
+            db.images[id].set_embedding(emb)
 
         done_ratio = (batch + 1) / num_batches
         done_percentage = done_ratio * 100

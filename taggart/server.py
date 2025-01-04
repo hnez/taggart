@@ -42,10 +42,6 @@ class Server:
         self.app.get("/images/<id:int>/tags/<tag>", callback=self.get_image_tag)
         self.app.put("/images/<id:int>/tags/<tag>", callback=self.set_image_tag)
 
-        self.app.get("/images/<id:int>/ratings", callback=self.get_image_ratings)
-        self.app.get("/images/<id:int>/ratings/<category>", callback=self.get_image_rating)
-        self.app.put("/images/<id:int>/ratings/<category>", callback=self.set_image_rating)
-
         self.app.get("/tags", callback=self.get_tags)
         self.app.get("/tags/<filter>/images", callback=self.get_tag_images)
 
@@ -65,12 +61,12 @@ class Server:
         raise NotImplementedError
 
     def get_image_file(self, id: int):
-        path = self.db.image_path(id)
+        path = self.db.images[id].path()
 
         return bottle.static_file(path, "/")
 
     def get_latent_preview_file(self, id: int):
-        image = self.db.latent_preview(id)
+        image = self.db.images[id].latent_preview()
 
         if image is None:
             raise bottle.HTTPError(404, "Latents have not been generated for this image")
@@ -84,31 +80,32 @@ class Server:
         return buf
 
     def get_image_neighbors(self, id: int):
-        count = self.db.image_count()
+        image = self.db.images[id]
 
-        serial_next = id % count + 1
-        serial_prev = (count + id - 2) % count + 1
-
-        shuffle_prev, shuffle_next = self.db.image_shuffle_neighbors(id)
+        serial_prev, serial_next = image.neighbors()
+        shuffle_prev, shuffle_next = image.shuffled_neighbors()
 
         return {
-            "serial_prev": serial_prev,
-            "serial_next": serial_next,
-            "shuffle_prev": shuffle_prev,
-            "shuffle_next": shuffle_next,
+            "serial_prev": serial_prev.id,
+            "serial_next": serial_next.id,
+            "shuffle_prev": shuffle_prev.id,
+            "shuffle_next": shuffle_next.id,
         }
 
     def get_image_similar(self, id: int):
-        return {"images": self.db.images_similar(id)}
+        image = self.db.images[id]
+
+        similar = tuple((img.id, value) for img, value in image.similar_images())
+
+        return {"images": similar}
 
     def get_image_tags(self, id: int):
-        assigned_tags = self.db.image_tags(id)
-        estimated_tags = self.db.tags_similar(id)
+        image = self.db.images[id]
 
-        tags = dict((name, {"estimated": weight}) for name, weight in estimated_tags.items())
+        tags = dict((name, {"estimated": weight}) for name, weight in image.similar_tags().items())
 
-        for name, weight in assigned_tags.items():
-            tags[name]["assigned"] = weight
+        for image_tag in image.tags:
+            tags[image_tag.label]["assigned"] = image_tag.weight()
 
         return tags
 
@@ -123,35 +120,10 @@ class Server:
         tag = self._clean_tag_name(tag)
         assigned_weight = req.get("assigned", 1)
 
-        self.db.image_set_tag_weight(id, tag, assigned_weight)
-
-    def get_image_ratings(self, id: int):
-        ratings = dict((name, {}) for name in self.db.rating_categories())
-
-        for name, value in self.db.image_ratings(id).items():
-            ratings[name]["assigned"] = value
-
-        return ratings
-
-    def get_image_rating(self, id: int, category: str):
-        # This is obviously a very inefficient way to do this.
-        # It is only here to make the API feel more complete.
-        # Optimize if it actually gets used.
-        return self.get_image_ratings(id)[category]
-
-    def set_image_rating(self, id: int, category: str):
-        req = bottle.request.json
-        category = self._clean_tag_name(category)
-        assigned = req["assigned"]
-
-        self.db.image_set_rating(id, category, assigned)
+        self.db.images[id].tags[tag].set_weight(assigned_weight)
 
     def get_tags(self):
-        tags = dict(
-            (name, {"occurrences": occurrences}) for name, occurrences in self.db.tags_with_occurrence().items()
-        )
-
-        return tags
+        return dict((tag.label, {"occurrences": occurrences}) for tag, occurrences in self.db.tags.occurrences())
 
     def get_tag_images(self, filter: str):
         tags = filter.split("+")
@@ -165,11 +137,11 @@ class Server:
             raise NotImplementedError()
 
         if include_estimated:
-            for id, similarity in self.db.images_similar_to_tags(tags):
-                if id not in images:
-                    images[id] = {}
+            for image, similarity in self.db.tags[tags].similar_images():
+                if image.id not in images:
+                    images[image.id] = {}
 
-                images[id]["estimated"] = similarity
+                images[image.id]["estimated"] = similarity
 
         images = sorted(
             ({"id": id, **kw} for id, kw in images.items()),

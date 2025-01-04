@@ -16,7 +16,9 @@ class ImagesToVaeDataset(ImagesToEmbedDataset):
         SELECT images.rowid AS image
         FROM images
         WHERE has_latents == FALSE AND broken == FALSE"""
+
     DROP_TMP_TABLE = "DROP TABLE images_to_vae"
+
     SELECT_COUNT = "SELECT COUNT(*) FROM images_to_vae"
     SELECT_IMAGE = """SELECT images.rowid, path FROM images_to_vae
         INNER JOIN images ON images_to_vae.image == images.rowid
@@ -95,7 +97,7 @@ def add_latents(db: Database, batch_size: int, num_workers):
 
         for id, lat in zip(image_ids, latents):
             id = id.item()
-            db.update_latent(id, lat)
+            db.images[id].set_latent(lat)
 
         done_ratio = (batch + 1) / num_batches
         done_percentage = done_ratio * 100

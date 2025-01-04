@@ -40,8 +40,7 @@ def main():
     db = Database(args.database, cpu=args.cpu)
 
     if args.command == "add":
-        for dir in args.directories:
-            db.add_images_from_dir(dir)
+        db.images.add_directories(args.directories)
 
     elif args.command == "serve":
         from taggart.server import Server
