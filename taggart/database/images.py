@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 
+import contextlib
 import os
 import re
 from collections.abc import Iterable
+from datetime import datetime
 
+import PIL.Image
 import torch
-from PIL import Image as PILImage
 
 from .utils import clamp, cosine_similarity, top_k
 
@@ -79,6 +81,7 @@ class Image:
         (SELECT image FROM image_shuffle AS rev WHERE rev.rowid == fwd.rowid + 1)
         FROM image_shuffle AS fwd WHERE fwd.image == ?"""
 
+    UPDATE_BROKEN = "UPDATE images SET broken = ? WHERE rowid == ?"
     UPDATE_HAS_EMBEDDING = "UPDATE images SET has_embedding = TRUE WHERE rowid == ?"
     UPDATE_HAS_LATENTS = "UPDATE images SET has_latents = TRUE WHERE rowid == ?"
     UPDATE_META = """UPDATE images SET
@@ -133,7 +136,7 @@ class Image:
         output = output * 127.5 + 127.5
         output = output.clamp(0, 255).byte().numpy()
 
-        image = PILImage.fromarray(output)
+        image = PIL.Image.fromarray(output)
 
         return image
 
@@ -151,20 +154,28 @@ class Image:
         return path
 
     def read(self):
-        (path, crop_left, crop_top, width, height) = self._db.execute(self.SELECT_PATH_AND_CROP, (self.id,)).fetchone()
+        (path, crop_left, crop_top, crop_width, crop_height) = self._db.execute(
+            self.SELECT_PATH_AND_CROP, (self.id,)
+        ).fetchone()
 
-        pil = PILImage.open(path)
+        try:
+            pil = PIL.Image.open(path)
+            pil = PIL.ImageOps.exif_transpose(pil)
+            pil = pil.convert("RGB")
 
-        # TODO: update metadata
+        except Exception as e:
+            self._db.images[self.id].set_broken()
 
-        width = pil.width if width is None else width
-        height = pil.height if height is None else height
+            raise e
+
+        crop_width = crop_width or pil.width
+        crop_height = crop_height or pil.height
 
         crop = (
-            clamp(crop_left, 0, width),
-            clamp(crop_top, 0, height),
-            clamp(crop_left + width, 0, width),
-            clamp(crop_top + height, 0, height),
+            clamp(crop_left, 0, pil.width - 1),
+            clamp(crop_top, 0, pil.height - 1),
+            clamp(crop_left + crop_width, 1, pil.width),
+            clamp(crop_top + crop_height, 1, pil.height),
         )
 
         no_crop = (0, 0, pil.width, pil.height)
@@ -172,7 +183,27 @@ class Image:
         if crop != no_crop:
             pil = pil.crop(crop)
 
+        file_size = os.stat(path).st_size
+
+        exif_camera = None
+        exif_ts = None
+
+        with contextlib.suppress(KeyError):
+            exif = pil.getexif()
+            exif_camera = exif[PIL.ExifTags.Base.Model]
+
+        with contextlib.suppress(KeyError, ValueError):
+            exif = pil.getexif()
+            exif_ts_raw = exif[PIL.ExifTags.Base.DateTime]
+            exif_ts_dt = datetime.strptime(exif_ts_raw, "%Y:%m:%d %H:%M:%S")
+            exif_ts = exif_ts_dt.timestamp()
+
+        self._db.images[self.id].set_meta(False, file_size, crop_width, crop_height, exif_camera, exif_ts)
+
         return pil
+
+    def set_broken(self, is_broken=True):
+        self._db.execute(self.UPDATE_BROKEN, (is_broken, self.id))
 
     def set_embedding(self, embedding: torch.Tensor):
         embeddings = self._db._embeddings.read_write()

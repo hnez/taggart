@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-import contextlib
-import os
 import sys
 from datetime import datetime
 
@@ -22,9 +20,7 @@ class ImagesToEmbedDataset(Dataset):
     DROP_TMP_TABLE = "DROP TABLE images_to_embed"
 
     SELECT_COUNT = "SELECT COUNT(*) FROM images_to_embed"
-    SELECT_IMAGE = """SELECT images.rowid, path FROM images_to_embed
-        INNER JOIN images ON images_to_embed.image == images.rowid
-        WHERE images_to_embed.rowid == (? + 1)"""
+    SELECT_IMAGE = "SELECT image FROM images_to_embed WHERE rowid == (? + 1)"
 
     def __init__(self, db: Database, image_processor: AutoProcessor):
         self.db = db
@@ -33,46 +29,20 @@ class ImagesToEmbedDataset(Dataset):
         self.db.execute(self.CREATE_TMP_TABLE)
 
     def __getitem__(self, index: int):
-        image_id, path = self.db.execute(self.SELECT_IMAGE, (index,)).fetchone()
-
-        file_size = None
-        broken = True
-        width = None
-        height = None
-        exif_camera = None
-        exif_ts = None
-
-        with contextlib.suppress(FileNotFoundError):
-            file_size = os.stat(path).st_size
+        (image_id,) = self.db.execute(self.SELECT_IMAGE, (index,)).fetchone()
+        image = self.db.images[image_id]
 
         try:
-            image = PIL.Image.open(path)
-            image = PIL.ImageOps.exif_transpose(image)
-            image = image.convert("RGB")
-
-            broken = False
-            width = image.width
-            height = image.height
+            pil = image.read()
 
         except Exception as e:
+            path = image.path()
             print(f'Failed to load "{path}":', e, file=sys.stderr, flush=True)
 
             image = PIL.Image.new("RGB", (1, 1))
 
-        inputs = self.image_processor(images=image, return_tensors="pt")
+        inputs = self.image_processor(images=pil, return_tensors="pt")
         pixel_values = inputs["pixel_values"].squeeze(0)
-
-        with contextlib.suppress(KeyError):
-            exif = image.getexif()
-            exif_camera = exif[PIL.ExifTags.Base.Model]
-
-        with contextlib.suppress(KeyError, ValueError):
-            exif = image.getexif()
-            exif_ts_raw = exif[PIL.ExifTags.Base.DateTime]
-            exif_ts_dt = datetime.strptime(exif_ts_raw, "%Y:%m:%d %H:%M:%S")
-            exif_ts = exif_ts_dt.timestamp()
-
-        self.db.images[image_id].set_meta(broken, file_size, width, height, exif_camera, exif_ts)
 
         return (image_id, pixel_values)
 

@@ -76,8 +76,9 @@ class Server:
         image = self.db.images[id]
         crop = image.crop_dimensions()
         url = f"/images/{id}.jpg"
+        latent_url = f"/images/{id}/latent/preview.png"
 
-        return {"id": id, "url": url, "crop": crop}
+        return {"id": id, "url": url, "crop": crop, "latent_url": latent_url}
 
     def get_image_file(self, id: int):
         path = self.db.images[id].path()

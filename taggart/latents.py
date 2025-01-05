@@ -20,9 +20,7 @@ class ImagesToVaeDataset(ImagesToEmbedDataset):
     DROP_TMP_TABLE = "DROP TABLE images_to_vae"
 
     SELECT_COUNT = "SELECT COUNT(*) FROM images_to_vae"
-    SELECT_IMAGE = """SELECT images.rowid, path FROM images_to_vae
-        INNER JOIN images ON images_to_vae.image == images.rowid
-        WHERE images_to_vae.rowid == (? + 1)"""
+    SELECT_IMAGE = "SELECT image FROM images_to_vae WHERE rowid == (? + 1)"
 
 
 def load_image_processor(width, height):
@@ -30,17 +28,17 @@ def load_image_processor(width, height):
 
     def image_processor(images, return_tensors):
         bounding_box = (
-            max(width, height * images.width // images.height + 1),
-            max(height, width * images.height // images.width + 1),
+            max(width, height * images.width // max(1, images.height) + 1),
+            max(height, width * images.height // max(1, images.width) + 1),
         )
 
         images.thumbnail(bounding_box)
 
         if images.width < width:
-            images = images.resize((width, width * images.height // images.width))
+            images = images.resize((width, width * images.height // max(1, images.width)))
 
         if images.height < height:
-            images = images.resize((height * images.width // images.height, height))
+            images = images.resize((height * images.width // max(1, images.height), height))
 
         crop = (
             max(0, (images.width - width) / 2),
