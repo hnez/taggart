@@ -35,6 +35,8 @@ class Server:
         self.app.get("/images/<id:int>.jpg", callback=self.get_image_file)
         self.app.get("/images/<id:int>/latent/preview.png", callback=self.get_latent_preview_file)
 
+        self.app.post("/images/<id:int>/crops", callback=self.post_image_crop)
+
         self.app.get("/images/<id:int>/neighbors", callback=self.get_image_neighbors)
         self.app.get("/images/<id:int>/similar", callback=self.get_image_similar)
 
@@ -70,11 +72,9 @@ class Server:
         raise NotImplementedError
 
     def get_image_file(self, id: int):
-        pil = self.db.images[id].read()
+        path = self.db.images[id].path()
 
-        pil.thumbnail((1024, 1024))
-
-        return self._serve_pil_image(pil, "jpeg")
+        return bottle.static_file(path, "/")
 
     def get_latent_preview_file(self, id: int):
         pil = self.db.images[id].latent_preview()
@@ -83,6 +83,15 @@ class Server:
             raise bottle.HTTPError(404, "Latents have not been generated for this image")
 
         return self._serve_pil_image(pil)
+
+    def post_image_crop(self, id: int):
+        crop = bottle.request.json
+
+        res = self.db.images[id].cropped(crop["left"], crop["top"], crop["width"], crop["height"])
+
+        bottle.response.set_header("Content-Location", f"/images/{res.id}")
+
+        return
 
     def get_image_neighbors(self, id: int):
         image = self.db.images[id]

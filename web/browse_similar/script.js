@@ -1,6 +1,6 @@
 "use strict";
 
-import { get_json, put_json } from "/common.js";
+import { get_json, post_json, put_json } from "/common.js";
 
 function tag_elem(image_id, tag_name, weight, where) {
   weight = Math.min(Math.max(weight, -1), 1);
@@ -156,8 +156,102 @@ async function load_image(id) {
   document.querySelector("#latent-image").src =
     `/images/${id}/latent/preview.png`;
 
+  reset_crop_box();
   await populate_tag_editor(id);
   await populate_roster(id);
+}
+
+function reset_crop_box() {
+  const crop_box = document.querySelector("#crop-box");
+
+  crop_box.style.left = "";
+  crop_box.style.top = "";
+  crop_box.style.right = "";
+  crop_box.style.bottom = "";
+}
+
+function update_crop_box(mouse_ev) {
+  const crop_editor = document.querySelector("#crop-editor");
+  const crop_box = document.querySelector("#crop-box");
+
+  const ce_bb = crop_editor.getBoundingClientRect();
+  const cb_bb = crop_box.getBoundingClientRect();
+
+  let left = cb_bb.left - ce_bb.left;
+  let right = ce_bb.right - cb_bb.right;
+
+  const off_left = mouse_ev.clientX - ce_bb.left;
+  const off_right = ce_bb.right - mouse_ev.clientX;
+
+  if (left === 0) {
+    left = off_left;
+  } else if (right === 0) {
+    right = off_right;
+  } else if (Math.abs(off_left - left) < Math.abs(off_right - right)) {
+    left = off_left;
+  } else {
+    right = off_right;
+  }
+
+  let bottom = ce_bb.bottom - cb_bb.bottom;
+  let top = cb_bb.top - ce_bb.top;
+
+  const off_top = mouse_ev.clientY - ce_bb.top;
+  const off_bottom = ce_bb.bottom - mouse_ev.clientY;
+
+  if (top === 0) {
+    top = off_top;
+  } else if (bottom === 0) {
+    bottom = off_bottom;
+  } else if (Math.abs(off_top - top) < Math.abs(off_bottom - bottom)) {
+    top = off_top;
+  } else {
+    bottom = off_bottom;
+  }
+
+  crop_box.style.left = `${left}px`;
+  crop_box.style.top = `${top}px`;
+  crop_box.style.right = `${right}px`;
+  crop_box.style.bottom = `${bottom}px`;
+}
+
+async function add_crop(mouse_ev, image_id) {
+  mouse_ev.stopPropagation();
+
+  const image = document.querySelector("#main");
+  const im_bb = image.getBoundingClientRect();
+  const res_width = image.naturalWidth;
+  const res_height = image.naturalHeight;
+
+  let scaling_factor;
+  let offset_x = 0;
+  let offset_y = 0;
+
+  if (res_width * im_bb.height < res_height * im_bb.width) {
+    // Scaling is limited in the height dimension and the image is centered vertically.
+    scaling_factor = res_height / im_bb.height;
+    offset_x = (im_bb.width * scaling_factor - res_width) / 2;
+  } else {
+    // Scaling is limited in the width dimension and the image is centered horizontally.
+    scaling_factor = res_width / im_bb.width;
+    offset_y = (im_bb.height * scaling_factor - res_height) / 2;
+  }
+
+  const crop_box = document.querySelector("#crop-box");
+  const cb_bb = crop_box.getBoundingClientRect();
+
+  const crop = {
+    height: cb_bb.height * scaling_factor,
+    left: (cb_bb.left - im_bb.left) * scaling_factor - offset_x,
+    top: (cb_bb.top - im_bb.top) * scaling_factor - offset_y,
+    width: cb_bb.width * scaling_factor,
+  };
+
+  reset_crop_box();
+
+  const _image_url = await post_json(`/images/${image_id}/crops`, crop);
+
+  // TODO: do something with the URL
 }
 
 async function main() {
@@ -194,6 +288,12 @@ async function main() {
       filter_suggested_tags();
     }
   });
+
+  const crop_editor = document.querySelector("#crop-editor");
+  crop_editor.addEventListener("mouseup", update_crop_box);
+
+  const crop_button = document.querySelector("#crop-button");
+  crop_button.addEventListener("mouseup", (ev) => add_crop(ev, image_id));
 
   await load_image(image_id);
 }

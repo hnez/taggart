@@ -72,6 +72,7 @@ class Image:
         FROM images WHERE rowid == ?"""
 
     SELECT_HAS_LATENTS = "SELECT has_latents FROM images WHERE rowid == ?"
+    SELECT_PATH = "SELECT path FROM images where rowid == ?"
     SELECT_PATH_AND_CROP = "SELECT path, crop_left, crop_top, width, height FROM images where rowid == ?"
     SELECT_SHUFFLE_NEIGHBORS = """SELECT
         (SELECT image FROM image_shuffle AS rev WHERE rev.rowid == fwd.rowid - 1),
@@ -95,9 +96,14 @@ class Image:
         self.tags = ImageTags(self._db, self.id)
 
     def cropped(self, left: int, top: int, width: int, height: int):
-        res = self._db.execute(self.INSERT_CROPPED, (left, top, width, height, self.id))
+        crop = (int(e) for e in (left, top, width, height))
 
-        return Image(self._db, res.lastrowid)
+        res = self._db.execute(self.INSERT_CROPPED, (*crop, self.id))
+        new_id = res.lastrowid
+
+        self._db._embeddings.resize((len(self._db.images) + 1, self._db.EMBEDDING_VEC_LEN))
+
+        return Image(self._db, new_id)
 
     def latent_preview(self):
         (has_latents,) = self._db.execute(self.SELECT_HAS_LATENTS, (self.id,)).fetchone()
@@ -126,6 +132,11 @@ class Image:
         nxt = self.id % count + 1
 
         return (Image(self._db, pre), Image(self._db, nxt))
+
+    def path(self):
+        (path,) = self._db.execute(self.SELECT_PATH, (self.id,)).fetchone()
+
+        return path
 
     def read(self):
         (path, crop_left, crop_top, width, height) = self._db.execute(self.SELECT_PATH_AND_CROP, (self.id,)).fetchone()
