@@ -24,7 +24,9 @@ class TagList:
         cosine_similarities = cosine_similarities.squeeze(2, 3)
         cosine_similarities = cosine_similarities.prod(1)
 
-        return tuple((Image(self._db, index), value) for index, value in top_k(cosine_similarities, count))
+        return tuple(
+            (Image(self._db, index), value) for index, value in top_k(cosine_similarities, count) if index != 0
+        )
 
 
 class Tag(TagList):

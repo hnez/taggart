@@ -23,8 +23,9 @@ def cosine_similarity(a, b):
     return res
 
 
-def top_k(x, top_k):
-    top_values, top_indices = torch.topk(x, top_k)
+def top_k(x, k):
+    k = min(x.shape[0], k)
+    top_values, top_indices = torch.topk(x, k)
 
     top_values = top_values.tolist()
     top_indices = top_indices.tolist()

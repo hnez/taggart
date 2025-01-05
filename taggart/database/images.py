@@ -240,10 +240,11 @@ class Image:
 
         cosine_similarities = cosine_similarity(embeddings, image_emb).squeeze(-2, -1)
 
-        # Suppress _this_ image as it would always be the most similar
-        cosine_similarities[self.id] = 0
-
-        return tuple((Image(self._db, index), value) for index, value in top_k(cosine_similarities, count))
+        return tuple(
+            (Image(self._db, index), value)
+            for index, value in top_k(cosine_similarities, count)
+            if index not in (0, self.id)
+        )
 
     def similar_tags(self):
         embeddings = self._db._embeddings.read_only()

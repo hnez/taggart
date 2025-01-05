@@ -145,7 +145,7 @@ async function populate_roster(id) {
   // in two steps.
   const similar = await get_json(`/images/${id}/similar`);
 
-  for (const idx_sim of similar.images.reverse()) {
+  for (const idx_sim of similar.images.sort((a, b) => a[1] < b[1])) {
     roster_elem.append(await roster_img_elem(idx_sim[0]));
   }
 }
