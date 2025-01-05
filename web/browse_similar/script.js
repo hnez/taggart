@@ -1,6 +1,6 @@
 "use strict";
 
-import { get_json, post_json, put_json } from "/common.js";
+import { cropped_image, get_json, post_json, put_json } from "/common.js";
 
 function tag_elem(image_id, tag_name, weight, where) {
   weight = Math.min(Math.max(weight, -1), 1);
@@ -112,14 +112,14 @@ async function populate_tag_editor(id) {
   filter_suggested_tags();
 }
 
-function roster_img_elem(id) {
-  const img = document.createElement("img");
-  img.className = "roster-element";
-  img.src = `/images/${id}.jpg`;
-  img.loading = "lazy";
+async function roster_img_elem(id) {
+  // TODO: include the info in the list response from the server
+  const info = await get_json(`/images/${id}`);
+  const img = cropped_image(info);
 
   const a = document.createElement("a");
   a.href = `#${id}`;
+  a.className = "roster-element";
   a.append(img);
 
   return a;
@@ -134,10 +134,10 @@ async function populate_roster(id) {
   // Start with the next, previous, a shuffled next and shuffled previous
   // image.
   roster_elem.replaceChildren(
-    roster_img_elem(neighbors.serial_prev),
-    roster_img_elem(neighbors.serial_next),
-    roster_img_elem(neighbors.shuffle_prev),
-    roster_img_elem(neighbors.shuffle_next),
+    await roster_img_elem(neighbors.serial_prev),
+    await roster_img_elem(neighbors.serial_next),
+    await roster_img_elem(neighbors.shuffle_prev),
+    await roster_img_elem(neighbors.shuffle_next),
   );
 
   // Then add images that the server deemed similar to this one.
@@ -146,17 +146,24 @@ async function populate_roster(id) {
   const similar = await get_json(`/images/${id}/similar`);
 
   for (const idx_sim of similar.images.reverse()) {
-    roster_elem.append(roster_img_elem(idx_sim[0]));
+    roster_elem.append(await roster_img_elem(idx_sim[0]));
   }
 }
 
 async function load_image(id) {
   // Populate the main image
+  /*
   document.querySelector("#main").src = `/images/${id}.jpg`;
   document.querySelector("#latent-image").src =
     `/images/${id}/latent/preview.png`;
+  */
 
-  reset_crop_box();
+  const info = await get_json(`/images/${id}`);
+
+  const pane_center = document.querySelector("#pane-center");
+  pane_center.replaceChildren(cropped_image(info));
+
+  // reset_crop_box();
   await populate_tag_editor(id);
   await populate_roster(id);
 }
@@ -289,11 +296,15 @@ async function main() {
     }
   });
 
+  /*
+
   const crop_editor = document.querySelector("#crop-editor");
   crop_editor.addEventListener("mouseup", update_crop_box);
 
   const crop_button = document.querySelector("#crop-button");
   crop_button.addEventListener("mouseup", (ev) => add_crop(ev, image_id));
+
+  */
 
   await load_image(image_id);
 }

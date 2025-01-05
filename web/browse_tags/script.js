@@ -1,6 +1,6 @@
 "use strict";
 
-import { get_json } from "/common.js";
+import { cropped_image, get_json } from "/common.js";
 
 function get_filter() {
   const hash = window.location.hash;
@@ -102,9 +102,9 @@ async function load_image_list(filter) {
     for (const image of page_images) {
       const id = image.id;
 
-      const img = document.createElement("img");
-      img.src = `/images/${id}.jpg`;
-      img.loading = "lazy";
+      // TODO: include the info in the list response from the server
+      const info = await get_json(`/images/${id}`);
+      const img = cropped_image(info);
 
       const a = document.createElement("a");
       a.href = `/browse_similar/#${id}`;

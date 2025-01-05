@@ -32,6 +32,7 @@ class Server:
             self.app.get(route, callback=functools.partial(bottle.static_file, filename, "web"))
 
         self.app.get("/images", callback=self.get_images)
+        self.app.get("/images/<id:int>", callback=self.get_image_info)
         self.app.get("/images/<id:int>.jpg", callback=self.get_image_file)
         self.app.get("/images/<id:int>/latent/preview.png", callback=self.get_latent_preview_file)
 
@@ -71,6 +72,13 @@ class Server:
     def get_images(self):
         raise NotImplementedError
 
+    def get_image_info(self, id: int):
+        image = self.db.images[id]
+        crop = image.crop_dimensions()
+        url = f"/images/{id}.jpg"
+
+        return {"url": url, "crop": crop}
+
     def get_image_file(self, id: int):
         path = self.db.images[id].path()
 
@@ -87,7 +95,7 @@ class Server:
     def post_image_crop(self, id: int):
         crop = bottle.request.json
 
-        res = self.db.images[id].cropped(crop["left"], crop["top"], crop["width"], crop["height"])
+        res = self.db.images[id].cropped_copy(crop["left"], crop["top"], crop["width"], crop["height"])
 
         bottle.response.set_header("Content-Location", f"/images/{res.id}")
 

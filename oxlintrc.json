@@ -16,6 +16,7 @@
     "max-lines": "allow",
     "max-params": "allow",
     "no-async-await": "allow",
+    "no-await-in-loop": "allow",
     "no-continue": "allow",
     "no-magic-numbers": "allow",
     "no-ternary": "allow",

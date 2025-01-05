@@ -95,7 +95,19 @@ class Image:
         self.id = id
         self.tags = ImageTags(self._db, self.id)
 
-    def cropped(self, left: int, top: int, width: int, height: int):
+    def crop_dimensions(self):
+        (_path, crop_left, crop_top, width, height) = self._db.execute(
+            self.SELECT_PATH_AND_CROP, (self.id,)
+        ).fetchone()
+
+        return {
+            "left": crop_left,
+            "top": crop_top,
+            "width": width,
+            "height": height,
+        }
+
+    def cropped_copy(self, left: int, top: int, width: int, height: int):
         crop = (int(e) for e in (left, top, width, height))
 
         res = self._db.execute(self.INSERT_CROPPED, (*crop, self.id))
@@ -142,6 +154,8 @@ class Image:
         (path, crop_left, crop_top, width, height) = self._db.execute(self.SELECT_PATH_AND_CROP, (self.id,)).fetchone()
 
         pil = PILImage.open(path)
+
+        # TODO: update metadata
 
         width = pil.width if width is None else width
         height = pil.height if height is None else height
