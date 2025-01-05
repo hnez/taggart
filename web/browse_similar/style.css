@@ -17,6 +17,34 @@ img {
   object-fit: contain;
 }
 
+.crop-box {
+  position: absolute;
+  border: 2px solid green;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  z-index: 1;
+}
+
+.crop-button {
+  position: absolute;
+  padding: 0.3em;
+  left: 50%;
+  bottom: 0;
+  transform: translate(-50%, 0);
+  z-index: 3;
+
+  border: 2px solid green;
+  border-bottom: none;
+  border-radius: 0.5em 0.5em 0 0;
+
+  color: white;
+  cursor: pointer;
+  text-decoration: none;
+  background-color: #0f0f0f78;
+}
+
 .tag {
   margin: 0.1em;
   display: inline-flex;
@@ -70,39 +98,6 @@ img {
 
   background-color: #131313;
   border-radius: 0.5em;
-}
-
-#crop-box {
-  position: absolute;
-  border: 2px solid green;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  right: 0;
-  z-index: 1;
-}
-
-#crop-button {
-  position: absolute;
-  padding: 0.3em;
-  left: 50%;
-  bottom: 0;
-  transform: translate(-50%, 0);
-  z-index: 3;
-
-  border: 2px solid green;
-  border-bottom: none;
-  border-radius: 0.5em 0.5em 0 0;
-
-  color: white;
-  cursor: pointer;
-  text-decoration: none;
-  background-color: #0f0f0f78;
-}
-
-#crop-editor {
-  position: relative;
-  z-index: 2;
 }
 
 #latent-image {

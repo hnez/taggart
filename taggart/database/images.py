@@ -68,7 +68,7 @@ class ImageTags:
 
 class Image:
     INSERT_CROPPED = """INSERT INTO images (path, crop_left, crop_top, width, height)
-        SELECT path, crop_left + ?, crop_top + ?, ?, ?
+        SELECT path, ?, ?, ?, ?
         FROM images WHERE rowid == ?"""
 
     SELECT_HAS_LATENTS = "SELECT has_latents FROM images WHERE rowid == ?"
@@ -228,7 +228,14 @@ class Image:
         return dict((tag.label, cosine_similarities[index]) for tag, index in self._db.tags.ids())
 
     def shuffled_neighbors(self):
-        pre, nxt = self._db.execute(self.SELECT_SHUFFLE_NEIGHBORS, (self.id,)).fetchone()
+        res = self._db.execute(self.SELECT_SHUFFLE_NEIGHBORS, (self.id,)).fetchone()
+
+        # TODO: this happens if images are added when the shuffle table
+        # was already generated.
+        if res is None:
+            return Image(self._db, 1), Image(self._db, 1)
+
+        pre, nxt = res
 
         return (Image(self._db, pre), Image(self._db, nxt))
 

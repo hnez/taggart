@@ -77,7 +77,7 @@ class Server:
         crop = image.crop_dimensions()
         url = f"/images/{id}.jpg"
 
-        return {"url": url, "crop": crop}
+        return {"id": id, "url": url, "crop": crop}
 
     def get_image_file(self, id: int):
         path = self.db.images[id].path()

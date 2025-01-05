@@ -13,6 +13,7 @@
     "browser": true
   },
   "rules": {
+    "button-has-type": "allow",
     "max-lines": "allow",
     "max-params": "allow",
     "no-async-await": "allow",
