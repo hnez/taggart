@@ -13,14 +13,15 @@ from .embeddings import ImagesToEmbedDataset
 
 class ImagesToVaeDataset(ImagesToEmbedDataset):
     CREATE_TMP_TABLE = """CREATE TEMPORARY TABLE images_to_vae AS
-        SELECT images.rowid AS image
-        FROM images
-        WHERE has_latents == FALSE AND broken == FALSE"""
+        SELECT rowid AS image FROM images
+        EXCEPT SELECT image FROM latents WHERE type == 'sd15-79x52'"""
 
     DROP_TMP_TABLE = "DROP TABLE images_to_vae"
 
     SELECT_COUNT = "SELECT COUNT(*) FROM images_to_vae"
-    SELECT_IMAGE = "SELECT image FROM images_to_vae WHERE rowid == (? + 1)"
+    SELECT_IMAGE = """SELECT id FROM images_to_vae
+        INNER JOIN images ON images.rowid == images_to_vae.image
+        WHERE images_to_vae.rowid == (? + 1)"""
 
 
 def load_image_processor(width, height):
@@ -35,10 +36,10 @@ def load_image_processor(width, height):
         images.thumbnail(bounding_box)
 
         if images.width < width:
-            images = images.resize((width, width * images.height // max(1, images.width)))
+            images = images.resize((width, width * images.height // images.width))
 
         if images.height < height:
-            images = images.resize((height * images.width // max(1, images.height), height))
+            images = images.resize((height * images.width // images.height, height))
 
         crop = (
             max(0, (images.width - width) / 2),
@@ -94,7 +95,6 @@ def add_latents(db: Database, batch_size: int, num_workers):
         latents = latents[:, :4]
 
         for id, lat in zip(image_ids, latents):
-            id = id.item()
             db.images[id].set_latent(lat)
 
         done_ratio = (batch + 1) / num_batches

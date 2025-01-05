@@ -100,14 +100,10 @@ async function load_image_list(filter) {
     page_elem.className = "page";
 
     for (const image of page_images) {
-      const id = image.id;
-
-      // TODO: include the info in the list response from the server
-      const info = await get_json(`/images/${id}`);
-      const img = cropped_image(info);
+      const img = cropped_image(image.info);
 
       const a = document.createElement("a");
-      a.href = `/browse_similar/#${id}`;
+      a.href = `/browse_similar/#${image.info.id}`;
       a.append(img);
 
       const tile = document.createElement("div");

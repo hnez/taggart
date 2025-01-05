@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 
-import itertools as it
 import sqlite3
 
-import torch
-
 from ..preview_decoder import PreviewDecoder
+from .image_files import ImageFiles
 from .images import Images
 from .tags import Tags
 from .tensor_file import TensorFile
@@ -16,42 +14,64 @@ class Database:
     LATENTS_SHAPE = (4, 79, 52)
 
     CREATE_TABLES = (
-        """CREATE TABLE IF NOT EXISTS images (
-            path TEXT NOT NULL,
+        """CREATE TABLE IF NOT EXISTS image_files (
+            path TEXT NOT NULL UNIQUE,
             ts_added INT NOT NULL DEFAULT (unixepoch()),
-            file_size INT,
+            file_size INT NOT NULL,
+            mime_type TEXT NOT NULL,
+            hash BLOB NOT NULL UNIQUE,
+            width INT NOT NULL,
+            height INT NOT NULL
+        ) STRICT""",
+        """CREATE TABLE IF NOT EXISTS exif (
+            file INTEGER NOT NULL REFERENCES image_files (rowid),
+            tag_id INTEGER NOT NULL,
+            value ANY NOT NULL,
+            UNIQUE(file, tag_id)
+        ) STRICT""",
+        """CREATE TABLE IF NOT EXISTS images (
+            file INTEGER NOT NULL REFERENCES image_files (rowid),
+            id BLOB NOT NULL DEFAULT (randomblob(8)),
+            ts_added INT NOT NULL DEFAULT (unixepoch()),
+            rotation REAL NOT NULL DEFAULT 0,
             crop_left INT NOT NULL DEFAULT 0,
             crop_top INT NOT NULL DEFAULT 0,
-            width INT,
-            height INT,
-            exif_camera TEXT,
-            exif_ts INT,
-            has_embedding INTEGER NOT NULL DEFAULT 0,
-            has_latents INTEGER NOT NULL DEFAULT 0,
-            broken INTEGER NOT NULL DEFAULT 0
+            width INT NOT NULL,
+            height INT NOT NULL,
+            UNIQUE(file, rotation, crop_left, crop_top, width, height)
         ) STRICT""",
         """CREATE TABLE IF NOT EXISTS tags (
-            label TEXT NOT NULL UNIQUE
-        ) STRICT""",
-        """CREATE TABLE IF NOT EXISTS image_tags (
             image INTEGER REFERENCES images (rowid),
-            tag INTEGER REFERENCES tags (rowid),
+            tag TEXT,
             weight REAL NOT NULL DEFAULT 0,
+            ts_added INT NOT NULL DEFAULT (unixepoch()),
             UNIQUE(image, tag)
         ) STRICT""",
-        "CREATE INDEX IF NOT EXISTS image_tags_image ON image_tags (image)",
-        "CREATE INDEX IF NOT EXISTS image_tags_tag ON image_tags (tag)",
-        "CREATE TEMPORARY TABLE image_shuffle AS SELECT images.rowid AS image FROM images ORDER BY RANDOM()",
-        "CREATE INDEX IF NOT EXISTS image_shuffle_rev ON image_shuffle ( image )",
+        """CREATE TABLE IF NOT EXISTS embeddings (
+            image INTEGER NOT NULL REFERENCES images (rowid),
+            type TEXT NOT NULL,
+            tensor_row INTEGER NOT NULL,
+            UNIQUE(image, type)
+        ) STRICT""",
+        """CREATE TABLE IF NOT EXISTS latents (
+            image INTEGER NOT NULL REFERENCES images (rowid),
+            type TEXT NOT NULL,
+            tensor_row INTEGER NOT NULL,
+            UNIQUE(image, type)
+        ) STRICT """,
     )
 
-    SELECT_ALL_TAG_IMAGE_WEIGHTS = "SELECT tag, image, weight FROM image_tags ORDER BY tag"
+    SELECT_ALL_TAG_TENSOR_ROW_WEIGHTS = """SELECT tag, tensor_row, weight FROM tags
+        INNER JOIN images ON tags.image == images.rowid
+        INNER JOIN embeddings ON embeddings.image == images.rowid
+        WHERE embeddings.type == 'siglip'"""
 
     def __init__(self, path: str, cpu=False):
         self._db = sqlite3.connect(path)
         self._tag_embeddings = None
         self._cpu = cpu
 
+        self.image_files = ImageFiles(self)
         self.images = Images(self)
         self.tags = Tags(self)
 
@@ -62,8 +82,8 @@ class Database:
 
         base_path = path.removesuffix(".db")
 
-        self._embeddings = TensorFile(f"{base_path}.embeddings", (len(self.images) + 1, self.EMBEDDING_VEC_LEN), cpu)
-        self._latents = TensorFile(f"{base_path}.latents", (len(self.images) + 1, *self.LATENTS_SHAPE), cpu)
+        self._embeddings = TensorFile(f"{base_path}.embeddings", (0, self.EMBEDDING_VEC_LEN), cpu)
+        self._latents = TensorFile(f"{base_path}.latents", (0, *self.LATENTS_SHAPE), cpu)
 
     def execute(self, *kargs, **kwargs):
         with self._db:
@@ -77,22 +97,19 @@ class Database:
         if self._tag_embeddings is None:
             embeddings = self._embeddings.read_only()
 
-            res = self.execute(self.SELECT_ALL_TAG_IMAGE_WEIGHTS)
+            tag_embeddings = dict()
 
-            img_and_weight_per_tag = dict((tag, list(tiw)) for tag, tiw in it.groupby(res, lambda p: p[0]))
+            for tag, tensor_row, weight in self.execute(self.SELECT_ALL_TAG_TENSOR_ROW_WEIGHTS):
+                weighted = embeddings[tensor_row] * weight
 
-            tag_dim = max(img_and_weight_per_tag.keys(), default=0) + 1
-            emb_dim = self.EMBEDDING_VEC_LEN
+                if tag in tag_embeddings:
+                    tag_embeddings[tag] += weighted
+                else:
+                    tag_embeddings[tag] = weighted
 
-            self._tag_embeddings = torch.zeros((tag_dim, emb_dim), device=embeddings.device, dtype=embeddings.dtype)
+            tag_names, tag_embeddings = zip(*tag_embeddings.items())
 
-            for tag, tiw in img_and_weight_per_tag.items():
-                image_ids = list(i for _t, i, _w in tiw)
-                weights = list(w for _t, _i, w in tiw)
-
-                weights = torch.tensor(weights, device=embeddings.device).unsqueeze(1)
-
-                self._tag_embeddings[tag] = (embeddings[image_ids] * weights).sum(0)
+            self._tag_embeddings = (tag_names, embeddings)
 
         return self._tag_embeddings
 

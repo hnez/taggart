@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 
-import sys
 from datetime import datetime
 
-import PIL
 import torch
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoModel, AutoProcessor
@@ -13,14 +11,15 @@ from .database import Database
 
 class ImagesToEmbedDataset(Dataset):
     CREATE_TMP_TABLE = """CREATE TEMPORARY TABLE images_to_embed AS
-        SELECT images.rowid AS image
-        FROM images
-        WHERE has_embedding == FALSE AND broken == FALSE"""
+        SELECT rowid AS image FROM images
+        EXCEPT SELECT image FROM embeddings WHERE type == 'siglip'"""
 
     DROP_TMP_TABLE = "DROP TABLE images_to_embed"
 
     SELECT_COUNT = "SELECT COUNT(*) FROM images_to_embed"
-    SELECT_IMAGE = "SELECT image FROM images_to_embed WHERE rowid == (? + 1)"
+    SELECT_IMAGE = """SELECT id FROM images_to_embed
+        INNER JOIN images ON images.rowid == images_to_embed.image
+        WHERE images_to_embed.rowid == (? + 1)"""
 
     def __init__(self, db: Database, image_processor: AutoProcessor):
         self.db = db
@@ -32,14 +31,7 @@ class ImagesToEmbedDataset(Dataset):
         (image_id,) = self.db.execute(self.SELECT_IMAGE, (index,)).fetchone()
         image = self.db.images[image_id]
 
-        try:
-            pil = image.read()
-
-        except Exception as e:
-            path = image.path()
-            print(f'Failed to load "{path}":', e, file=sys.stderr, flush=True)
-
-            image = PIL.Image.new("RGB", (1, 1))
+        pil = image.read()
 
         inputs = self.image_processor(images=pil, return_tensors="pt")
         pixel_values = inputs["pixel_values"].squeeze(0)
@@ -95,7 +87,6 @@ def add_embeddings(db: Database, batch_size: int, num_workers: int):
         embeddings = output["pooler_output"]
 
         for id, emb in zip(image_ids, embeddings):
-            id = id.item()
             db.images[id].set_embedding(emb)
 
         done_ratio = (batch + 1) / num_batches

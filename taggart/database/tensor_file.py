@@ -10,22 +10,28 @@ import torch
 
 
 class TensorFile:
-    def __init__(self, path: str, shape: tuple[int], cpu=False, dtype=np.float32):
+    def __init__(self, path: str, shape: tuple[int], cpu=False, dtype=np.float32, grow_increment=32):
         self.path = path
         self.shape = shape
         self.cpu = cpu
         self.dtype = dtype
+        self.grow_increment = grow_increment
 
         self._rw = None
         self._ro = None
 
-    def resize(self, shape):
-        assert shape[1:] == self.shape[1:]
+    def grow_rows(self, rows):
+        rows = (rows + self.grow_increment - 1) // self.grow_increment * self.grow_increment
 
-        if shape[0] > self.shape[0]:
-            self.shape = shape
+        if rows > self.shape[0]:
+            self.shape = (rows, *self.shape[1:])
             self._rw = None
             self._ro = None
+
+    def grow(self, shape):
+        assert shape[1:] == self.shape[1:]
+
+        self.grow_rows(shape[0])
 
     def read_write(self):
         if self._rw is None:
@@ -47,10 +53,11 @@ class TensorFile:
                 os.truncate(self.path, min_size)
                 current_size = min_size
 
-            self.shape = (current_size // bytes_per_row, *self.shape[1:])
+            if current_size > 0:
+                self.shape = (current_size // bytes_per_row, *self.shape[1:])
 
-            mmap = np.memmap(self.path, self.dtype, "r+", 0, self.shape)
-            self._rw = torch.from_numpy(mmap)
+                mmap = np.memmap(self.path, self.dtype, "r+", 0, self.shape)
+                self._rw = torch.from_numpy(mmap)
 
         # Invalidate the read only copy of the tensor that may reside
         # on the GPU.

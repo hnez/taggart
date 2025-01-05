@@ -1,18 +1,7 @@
 "use strict";
 
-function is_cropped(info, img) {
-  return (
-    info.crop.left !== 0 ||
-    info.crop.top !== 0 ||
-    (info.crop.width !== null && info.crop.width !== img.naturalWidth) ||
-    (info.crop.height !== null && info.crop.height !== img.naturalHeight)
-  );
-}
-
 function cropped_image_onload(ev, info) {
   const img = ev.target;
-
-  if (!is_cropped(info, img)) return;
 
   const inner = img.parentNode;
   const outer = inner.parentNode;
@@ -106,12 +95,13 @@ async function crop_button_onmouseup(ev, image_id, img, crop_box) {
   const crop = {
     height: crop_box_bb.height * scaling_factor,
     left: (crop_box_bb.left - img_bb.left) * scaling_factor + offset_x,
+    rotation: 0, // TODO: implement
     top: (crop_box_bb.top - img_bb.top) * scaling_factor + offset_y,
     width: crop_box_bb.width * scaling_factor,
   };
 
   const image_url = await post_json(`/images/${image_id}/crops`, crop);
-  const new_id = image_url.match("images/([0-9]+)")[1];
+  const new_id = image_url.match("images/([a-fA-F0-9]+)")[1];
   document.location = `#${new_id}`;
 }
 
@@ -152,9 +142,16 @@ export function cropped_image(info, editor) {
     );
   }
 
-  // TODO: add the original image width and height to `info`.
-  // Then we can skip this alltogether if the images is not cropped.
-  img.addEventListener("load", (ev) => cropped_image_onload(ev, info));
+  const is_cropped =
+    info.crop.rotation !== 0 ||
+    info.crop.left !== 0 ||
+    info.crop.top !== 0 ||
+    info.crop.width !== info.file_width ||
+    info.crop.height !== info.file_height;
+
+  if (is_cropped) {
+    img.addEventListener("load", (ev) => cropped_image_onload(ev, info));
+  }
 
   return outer;
 }

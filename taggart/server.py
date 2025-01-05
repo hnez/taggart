@@ -31,19 +31,21 @@ class Server:
         for route, filename in self.STATIC_ROUTES:
             self.app.get(route, callback=functools.partial(bottle.static_file, filename, "web"))
 
+        self.app.get("/image_files/<hash>.jpg", callback=self.get_image_file)
+
         self.app.get("/images", callback=self.get_images)
-        self.app.get("/images/<id:int>", callback=self.get_image_info)
-        self.app.get("/images/<id:int>.jpg", callback=self.get_image_file)
-        self.app.get("/images/<id:int>/latent/preview.png", callback=self.get_latent_preview_file)
+        self.app.get("/images/random", callback=self.redirect_image_random)
+        self.app.get("/images/<id>", callback=self.get_image_info)
+        self.app.get("/images/<id>/latent/preview.png", callback=self.get_latent_preview_file)
 
-        self.app.post("/images/<id:int>/crops", callback=self.post_image_crop)
+        self.app.post("/images/<id>/crops", callback=self.post_image_crop)
 
-        self.app.get("/images/<id:int>/neighbors", callback=self.get_image_neighbors)
-        self.app.get("/images/<id:int>/similar", callback=self.get_image_similar)
+        self.app.get("/images/<id>/neighbors", callback=self.get_image_neighbors)
+        self.app.get("/images/<id>/similar", callback=self.get_image_similar)
 
-        self.app.get("/images/<id:int>/tags", callback=self.get_image_tags)
-        self.app.get("/images/<id:int>/tags/<tag>", callback=self.get_image_tag)
-        self.app.put("/images/<id:int>/tags/<tag>", callback=self.set_image_tag)
+        self.app.get("/images/<id>/tags", callback=self.get_image_tags)
+        self.app.get("/images/<id>/tags/<tag>", callback=self.get_image_tag)
+        self.app.put("/images/<id>/tags/<tag>", callback=self.set_image_tag)
 
         self.app.get("/tags", callback=self.get_tags)
         self.app.get("/tags/<filter>/images", callback=self.get_tag_images)
@@ -66,79 +68,97 @@ class Server:
 
         return buf
 
+    def _image_info(self, image):
+        crop = image.crop_dimensions()
+        image_file = image.image_file()
+
+        url = f"/image_files/{image_file.hexhash}.jpg"
+
+        # TODO: only add if it exists
+        latent_url = f"/images/{image.hexid}/latent/preview.png"
+
+        return {"id": image.hexid, "url": url, "crop": crop, "latent_url": latent_url}
+
     def run(self, *kargs, **kwargs):
         self.app.run(*kargs, **kwargs)
+
+    def get_image_file(self, hash: str):
+        path = self.db.image_files[hash].path()
+
+        return bottle.static_file(path, "/")
 
     def get_images(self):
         raise NotImplementedError
 
-    def get_image_info(self, id: int):
-        image = self.db.images[id]
-        crop = image.crop_dimensions()
-        url = f"/images/{id}.jpg"
-        latent_url = f"/images/{id}/latent/preview.png"
+    def redirect_image_random(self):
+        image = self.db.images.get_random()
 
-        return {"id": id, "url": url, "crop": crop, "latent_url": latent_url}
+        if image is None:
+            pass
 
-    def get_image_file(self, id: int):
-        path = self.db.images[id].path()
+        bottle.redirect(f"/images/{image.hexid}")
 
-        return bottle.static_file(path, "/")
+    def get_image_info(self, id: str):
+        return self._image_info(self.db.images[id])
 
-    def get_latent_preview_file(self, id: int):
+    def get_latent_preview_file(self, id: str):
         pil = self.db.images[id].latent_preview()
 
         if pil is None:
-            raise bottle.HTTPError(404, "Latents have not been generated for this image")
+            raise bottle.HTTPError(404, "Latents of this type have not been generated for this image")
 
         return self._serve_pil_image(pil)
 
-    def post_image_crop(self, id: int):
+    def post_image_crop(self, id: str):
         crop = bottle.request.json
 
-        res = self.db.images[id].cropped_copy(crop["left"], crop["top"], crop["width"], crop["height"])
+        new_image = self.db.images[id].cropped_copy(
+            crop["rotation"], crop["left"], crop["top"], crop["width"], crop["height"]
+        )
 
-        bottle.response.set_header("Content-Location", f"/images/{res.id}")
+        bottle.response.set_header("Content-Location", f"/images/{new_image.hexid}")
 
-        return
-
-    def get_image_neighbors(self, id: int):
+    def get_image_neighbors(self, id: str):
         image = self.db.images[id]
 
-        serial_prev, serial_next = image.neighbors()
-        shuffle_prev, shuffle_next = image.shuffled_neighbors()
+        serial_next, serial_prev, shuffle_next, shuffle_prev = tuple(
+            self._image_info(n) if n is not None else None for n in image.neighbors()
+        )
 
         return {
-            "serial_prev": serial_prev.id,
-            "serial_next": serial_next.id,
-            "shuffle_prev": shuffle_prev.id,
-            "shuffle_next": shuffle_next.id,
+            "serial_prev": serial_prev,
+            "serial_next": serial_next,
+            "shuffle_prev": shuffle_prev,
+            "shuffle_next": shuffle_next,
         }
 
-    def get_image_similar(self, id: int):
+    def get_image_similar(self, id: str):
         image = self.db.images[id]
 
-        similar = tuple((img.id, value) for img, value in image.similar_images())
+        similar = tuple((self._image_info(img), value) for img, value in image.similar_images())
 
         return {"images": similar}
 
-    def get_image_tags(self, id: int):
+    def get_image_tags(self, id: str):
         image = self.db.images[id]
 
-        tags = dict((name, {"estimated": weight}) for name, weight in image.similar_tags().items())
+        tags = dict((tag.tag, {}) for tag in self.db.tags)
+
+        for tag_name, value in image.similar_tags():
+            tags[tag_name]["estimated"] = value
 
         for image_tag in image.tags:
-            tags[image_tag.label]["assigned"] = image_tag.weight()
+            tags[image_tag.tag]["assigned"] = image_tag.weight()
 
         return tags
 
-    def get_image_tag(self, id: int, tag: str):
+    def get_image_tag(self, id: str, tag: str):
         # This is obviously a very inefficient way to do this.
         # It is only here to make the API feel more complete.
         # Optimize if it actually gets used.
         return self.get_image_tags(id)[tag]
 
-    def set_image_tag(self, id: int, tag: str):
+    def set_image_tag(self, id: str, tag: str):
         req = bottle.request.json
         tag = self._clean_tag_name(tag)
         assigned_weight = req.get("assigned", 1)
@@ -146,7 +166,7 @@ class Server:
         self.db.images[id].tags[tag].set_weight(assigned_weight)
 
     def get_tags(self):
-        return dict((tag.label, {"occurrences": occurrences}) for tag, occurrences in self.db.tags.occurrences())
+        return dict((tag.tag, {"occurrences": occurrences}) for tag, occurrences in self.db.tags.occurrences())
 
     def get_tag_images(self, filter: str):
         tags = filter.split("+")
@@ -162,12 +182,13 @@ class Server:
         if include_estimated:
             for image, similarity in self.db.tags[tags].similar_images():
                 if image.id not in images:
-                    images[image.id] = {}
+                    images[image.hexid] = {}
 
-                images[image.id]["estimated"] = similarity
+                images[image.hexid]["info"] = self._image_info(image)
+                images[image.hexid]["estimated"] = similarity
 
         images = sorted(
-            ({"id": id, **kw} for id, kw in images.items()),
+            images.values(),
             key=lambda a: a["assigned"] if "assigned" in a else a["estimated"],
             reverse=True,
         )

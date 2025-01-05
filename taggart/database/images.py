@@ -1,38 +1,32 @@
 #!/usr/bin/env python3
 
-import contextlib
+import hashlib
 import os
 import re
 from collections.abc import Iterable
-from datetime import datetime
 
 import PIL.Image
-import torch
 
 from .utils import clamp, cosine_similarity, top_k
 
 
 class ImageTag:
-    INSERT_TAG = "INSERT OR IGNORE INTO tags (label) VALUES (?)"
-
-    UPDATE_TAG_WEIGHT = """INSERT INTO image_tags (image, tag, weight)
-        SELECT :image, rowid, :weight FROM tags WHERE label == :label
+    UPDATE_TAG_WEIGHT = """INSERT INTO tags (image, tag, weight)
+        SELECT rowid, :tag, :weight FROM images WHERE id == :id
         ON CONFLICT DO UPDATE SET weight=:weight"""
 
-    def __init__(self, db, id: int, label: str, weight: float):
+    def __init__(self, db, id: bytes, tag: str, weight: float):
         self._db = db
         self._weight = weight
 
         self.id = id
-        self.label = label
+        self.tag = tag
 
     def weight(self):
         return self._weight
 
     def set_weight(self, weight):
-        self._db.execute(self.INSERT_TAG, (self.label,))
-        self._db.execute(self.UPDATE_TAG_WEIGHT, {"image": self.id, "label": self.label, "weight": weight})
-
+        self._db.execute(self.UPDATE_TAG_WEIGHT, {"id": self.id, "tag": self.tag, "weight": weight})
         self._weight = weight
 
         # TODO: update the embeddings right here by adding the image embeddings
@@ -41,96 +35,129 @@ class ImageTag:
 
 
 class ImageTags:
-    SELECT_TAG = """SELECT weight FROM image_tags
-        INNER JOIN tags ON image_tags.tag == tags.rowid
-        WHERE image_tags.image == ?"""
-    SELECT_TAGS = """SELECT label, weight FROM image_tags
-        INNER JOIN tags ON image_tags.tag == tags.rowid
-        WHERE image_tags.image == ? AND weight != 0"""
+    SELECT_TAG = """SELECT weight FROM tags
+        INNER JOIN images ON tags.image == images.rowid
+        WHERE id == ? AND tag == ?"""
+    SELECT_TAGS = """SELECT tag, weight FROM tags
+        INNER JOIN images ON tags.image == images.rowid
+        WHERE id == ? and weight != 0"""
 
-    def __init__(self, db, id: int):
+    def __init__(self, db, id: bytes):
         self._db = db
         self.id = id
 
-    def __getitem__(self, label):
-        res = self._db.execute(self.SELECT_TAG, (self.id,)).fetchone()
+    def __getitem__(self, tag):
+        res = self._db.execute(self.SELECT_TAG, (self.id, tag)).fetchone()
 
         # We treat tags with weight zero the same as unset tags.
         # So just return an ImageTag with weight zero if no tag is set yet.
         weight = res[0] if res is not None else 0
 
-        return ImageTag(self._db, self.id, label, weight)
+        return ImageTag(self._db, self.id, tag, weight)
 
     def __iter__(self):
         return iter(
-            ImageTag(self._db, self.id, label, weight)
-            for label, weight in self._db.execute(self.SELECT_TAGS, (self.id,))
+            ImageTag(self._db, self.id, tag, weight) for tag, weight in self._db.execute(self.SELECT_TAGS, (self.id,))
         )
 
 
 class Image:
-    INSERT_CROPPED = """INSERT INTO images (path, crop_left, crop_top, width, height)
-        SELECT path, ?, ?, ?, ?
-        FROM images WHERE rowid == ?"""
+    INSERT_CROPPED_COPY = """INSERT INTO images (file, rotation, crop_left, crop_top, width, height)
+        SELECT file, ?, ?, ?, ?, ?
+        FROM images WHERE id == ?"""
+    INSERT_EMBEDDING = """INSERT OR IGNORE INTO embeddings (image, type, tensor_row)
+        VALUES (
+            (SELECT rowid FROM images WHERE id == ?),
+            'siglip',
+            (SELECT COALESCE(MAX(tensor_row) + 1, 0) FROM embeddings WHERE type == 'siglip')
+        )"""
+    INSERT_LATENT = """INSERT OR IGNORE INTO latents (image, type, tensor_row)
+        VALUES (
+            (SELECT rowid FROM images WHERE id == ?),
+            'siglip',
+            (SELECT COALESCE(MAX(tensor_row) + 1, 0) FROM latents WHERE type == 'sd15-79x52')
+        )"""
 
-    SELECT_HAS_LATENTS = "SELECT has_latents FROM images WHERE rowid == ?"
-    SELECT_PATH = "SELECT path FROM images where rowid == ?"
-    SELECT_PATH_AND_CROP = "SELECT path, crop_left, crop_top, width, height FROM images where rowid == ?"
-    SELECT_SHUFFLE_NEIGHBORS = """SELECT
-        (SELECT image FROM image_shuffle AS rev WHERE rev.rowid == fwd.rowid - 1),
-        (SELECT image FROM image_shuffle AS rev WHERE rev.rowid == fwd.rowid + 1)
-        FROM image_shuffle AS fwd WHERE fwd.image == ?"""
+    SELECT_BY_ROWID = "SELECT id FROM images WHERE rowid == ?"
+    SELECT_EMBEDDINGS_TENSOR_ROW = """SELECT tensor_row FROM embeddings
+        INNER JOIN images ON images.rowid == embeddings.image
+        WHERE id == ? AND type == 'siglip'"""
+    SELECT_LATENTS_TENSOR_ROW = """SELECT tensor_row FROM latents
+        INNER JOIN images ON images.rowid == latents.image
+        WHERE id == ? AND type == 'sd15-79x52'"""
+    SELECT_ID_FOR_TENSOR_ROW = """SELECT id FROM images
+        INNER JOIN embeddings ON images.rowid == embeddings.image
+        WHERE tensor_row == ? AND type == 'siglip'"""
+    SELECT_CROP = """SELECT
+        rotation, crop_left, crop_top, images.width, images.height, image_files.width, image_files.height
+        FROM images INNER JOIN image_files ON image_files.rowid == images.file
+        WHERE id == ?"""
+    SELECT_FILE_HASH = """SELECT hash FROM images
+        INNER JOIN image_files ON image_files.rowid == images.file
+        WHERE id == ?"""
+    SELECT_NEIGHBORS = """SELECT
+        (SELECT fwd.id FROM images AS fwd WHERE fwd.rowid > rev.rowid ORDER BY rowid ASC LIMIT 1),
+        (SELECT fwd.id FROM images AS fwd WHERE fwd.rowid < rev.rowid ORDER BY rowid DESC LIMIT 1),
+        (SELECT fwd.id FROM images AS fwd WHERE fwd.id > rev.id ORDER BY id ASC LIMIT 1),
+        (SELECT fwd.id FROM images AS fwd WHERE fwd.id < rev.id ORDER BY id DESC LIMIT 1)
+        FROM images AS rev WHERE rev.id == ?
+        """
 
-    UPDATE_BROKEN = "UPDATE images SET broken = ? WHERE rowid == ?"
-    UPDATE_HAS_EMBEDDING = "UPDATE images SET has_embedding = TRUE WHERE rowid == ?"
-    UPDATE_HAS_LATENTS = "UPDATE images SET has_latents = TRUE WHERE rowid == ?"
-    UPDATE_META = """UPDATE images SET
-        file_size = :file_size,
-        width = :width,
-        height = :height,
-        exif_camera = :exif_camera,
-        exif_ts = :exif_ts,
-        broken = :is_broken
-        WHERE rowid == :id"""
-
-    def __init__(self, db, id: int):
+    def __init__(self, db, id: bytes):
         self._db = db
         self.id = id
+        self.hexid = id.hex()
         self.tags = ImageTags(self._db, self.id)
 
+    @classmethod
+    def from_tensor_row(cls, db, tensor_row):
+        res = db.execute(cls.SELECT_ID_FOR_TENSOR_ROW, (tensor_row,)).fetchone()
+
+        if res is None:
+            return None
+
+        return cls(db, res[0])
+
     def crop_dimensions(self):
-        (_path, crop_left, crop_top, width, height) = self._db.execute(
-            self.SELECT_PATH_AND_CROP, (self.id,)
+        (rotation, crop_left, crop_top, width, height, file_width, file_height) = self._db.execute(
+            self.SELECT_CROP, (self.id,)
         ).fetchone()
 
         return {
+            "rotation": rotation,
             "left": crop_left,
             "top": crop_top,
             "width": width,
             "height": height,
+            "file_width": file_width,
+            "file_height": file_height,
         }
 
-    def cropped_copy(self, left: int, top: int, width: int, height: int):
-        crop = (int(e) for e in (left, top, width, height))
+    def cropped_copy(self, rotation: int, left: int, top: int, width: int, height: int):
+        crop = (int(e) for e in (rotation, left, top, width, height))
 
-        res = self._db.execute(self.INSERT_CROPPED, (*crop, self.id))
-        new_id = res.lastrowid
-
-        self._db._embeddings.resize((len(self._db.images) + 1, self._db.EMBEDDING_VEC_LEN))
+        cur = self._db.execute(self.INSERT_CROPPED_COPY, (*crop, self.id))
+        (new_id,) = self._db.execute(self.SELECT_BY_ROWID, (cur.lastrowid,)).fetchone()
 
         return Image(self._db, new_id)
 
-    def latent_preview(self):
-        (has_latents,) = self._db.execute(self.SELECT_HAS_LATENTS, (self.id,)).fetchone()
+    def image_file(self):
+        (hash,) = self._db.execute(self.SELECT_FILE_HASH, (self.id,)).fetchone()
 
-        if not has_latents:
+        return self._db.image_files[hash]
+
+    def latent_preview(self):
+        res = self._db.execute(self.SELECT_LATENTS_TENSOR_ROW, (self.id,)).fetchone()
+
+        if res is None:
             return None
 
+        (tensor_row,) = res
+
         latents = self._db._latents.read_write()
-        latent = latents[self.id : self.id + 1]
+        latent = latents[tensor_row : tensor_row + 1]
 
         output = self._db.preview_decoder.forward(latent)
-
         output = output[0].transpose(0, -1).transpose(0, 1)
 
         output = output * 127.5 + 127.5
@@ -141,12 +168,11 @@ class Image:
         return image
 
     def neighbors(self):
-        count = len(self._db.images)
+        res = self._db.execute(self.SELECT_NEIGHBORS, (self.id,)).fetchone()
 
-        pre = (count + self.id - 2) % count + 1
-        nxt = self.id % count + 1
+        nxt, pre, shuf_nxt, shuf_pre = tuple(Image(self._db, id) if id is not None else None for id in res)
 
-        return (Image(self._db, pre), Image(self._db, nxt))
+        return nxt, pre, shuf_nxt, shuf_pre
 
     def path(self):
         (path,) = self._db.execute(self.SELECT_PATH, (self.id,)).fetchone()
@@ -154,28 +180,20 @@ class Image:
         return path
 
     def read(self):
-        (path, crop_left, crop_top, crop_width, crop_height) = self._db.execute(
-            self.SELECT_PATH_AND_CROP, (self.id,)
-        ).fetchone()
+        path = self.image_file().path()
+        crop = self.crop_dimensions()
 
-        try:
-            pil = PIL.Image.open(path)
-            pil = PIL.ImageOps.exif_transpose(pil)
-            pil = pil.convert("RGB")
+        pil = PIL.Image.open(path)
+        pil = pil.convert("RGB")
 
-        except Exception as e:
-            self._db.images[self.id].set_broken()
-
-            raise e
-
-        crop_width = crop_width or pil.width
-        crop_height = crop_height or pil.height
+        if crop["rotation"] != 0:
+            pil = pil.rotate(crop["rotation"])
 
         crop = (
-            clamp(crop_left, 0, pil.width - 1),
-            clamp(crop_top, 0, pil.height - 1),
-            clamp(crop_left + crop_width, 1, pil.width),
-            clamp(crop_top + crop_height, 1, pil.height),
+            clamp(crop["left"], 0, pil.width - 1),
+            clamp(crop["top"], 0, pil.height - 1),
+            clamp(crop["left"] + crop["width"], 1, pil.width),
+            clamp(crop["top"] + crop["height"], 1, pil.height),
         )
 
         no_crop = (0, 0, pil.width, pil.height)
@@ -183,73 +201,70 @@ class Image:
         if crop != no_crop:
             pil = pil.crop(crop)
 
-        file_size = os.stat(path).st_size
-
-        exif_camera = None
-        exif_ts = None
-
-        with contextlib.suppress(KeyError):
-            exif = pil.getexif()
-            exif_camera = exif[PIL.ExifTags.Base.Model]
-
-        with contextlib.suppress(KeyError, ValueError):
-            exif = pil.getexif()
-            exif_ts_raw = exif[PIL.ExifTags.Base.DateTime]
-            exif_ts_dt = datetime.strptime(exif_ts_raw, "%Y:%m:%d %H:%M:%S")
-            exif_ts = exif_ts_dt.timestamp()
-
-        self._db.images[self.id].set_meta(False, file_size, crop_width, crop_height, exif_camera, exif_ts)
-
         return pil
 
-    def set_broken(self, is_broken=True):
-        self._db.execute(self.UPDATE_BROKEN, (is_broken, self.id))
+    def set_embedding(self, embedding):
+        self._db.execute(self.INSERT_EMBEDDING, (self.id,))
 
-    def set_embedding(self, embedding: torch.Tensor):
-        embeddings = self._db._embeddings.read_write()
-        embeddings[self.id] = embedding.to(embeddings.device)
+        (tensor_row,) = self._db.execute(self.SELECT_EMBEDDINGS_TENSOR_ROW, (self.id,)).fetchone()
 
-        self._db.execute(self.UPDATE_HAS_EMBEDDING, (self.id,))
+        self._db._embeddings.grow_rows(tensor_row + 1)
 
-    def set_latent(self, latent: torch.Tensor):
-        latents = self._db._latents.read_write()
-        latents[self.id] = latent.to(latents.device)
+        rw = self._db._embeddings.read_write()
+        rw[tensor_row] = embedding.to(rw.device)
 
-        self._db.execute(self.UPDATE_HAS_LATENTS, (self.id,))
+    def set_latent(self, latent):
+        self._db.execute(self.INSERT_LATENT, (self.id,))
 
-    def set_meta(self, is_broken: bool, file_size: int, width: int, height: int, exif_camera: str, exif_ts: int):
-        self._db.execute(
-            self.UPDATE_META,
-            {
-                "id": self.id,
-                "is_broken": is_broken,
-                "file_size": file_size,
-                "width": width,
-                "height": height,
-                "exif_camera": exif_camera,
-                "exif_ts": exif_ts,
-            },
-        )
+        (tensor_row,) = self._db.execute(self.SELECT_LATENTS_TENSOR_ROW, (self.id,)).fetchone()
+
+        self._db._latents.grow_rows(tensor_row + 1)
+
+        rw = self._db._latents.read_write()
+        rw[tensor_row] = latent.to(rw.device)
 
     def similar_images(self, count=100):
+        res = self._db.execute(self.SELECT_EMBEDDINGS_TENSOR_ROW, (self.id,)).fetchone()
+
+        if res is None:
+            return tuple()
+
+        (my_tensor_row,) = res
+
         embeddings = self._db._embeddings.read_only()
-        image_emb = embeddings[self.id]
+        image_emb = embeddings[my_tensor_row]
 
         embeddings = embeddings.unsqueeze(-2)
         image_emb = image_emb.unsqueeze(0).unsqueeze(-1)
 
         cosine_similarities = cosine_similarity(embeddings, image_emb).squeeze(-2, -1)
 
-        return tuple(
-            (Image(self._db, index), value)
-            for index, value in top_k(cosine_similarities, count)
-            if index not in (0, self.id)
-        )
+        result = list()
+
+        for tensor_row, value in top_k(cosine_similarities, count):
+            if tensor_row == my_tensor_row:
+                continue
+
+            image = Image.from_tensor_row(tensor_row)
+
+            if image is None:
+                continue
+
+            result.append((image, value))
+
+        return tuple(result)
 
     def similar_tags(self):
+        res = self._db.execute(self.SELECT_EMBEDDINGS_TENSOR_ROW, (self.id,)).fetchone()
+
+        if res is None:
+            return dict()
+
+        (my_tensor_row,) = res
+
         embeddings = self._db._embeddings.read_only()
-        image_emb = embeddings[self.id]
-        tag_emb = self._db.tag_embeddings()
+        image_emb = embeddings[my_tensor_row]
+        tags, tag_emb = self._db.tag_embeddings()
 
         tag_emb = tag_emb.unsqueeze(-2)
         image_emb = image_emb.unsqueeze(0).unsqueeze(-1)
@@ -257,38 +272,74 @@ class Image:
         cosine_similarities = cosine_similarity(tag_emb, image_emb).squeeze(-2, -1)
         cosine_similarities = cosine_similarities.tolist()
 
-        return dict((tag.label, cosine_similarities[index]) for tag, index in self._db.tags.ids())
-
-    def shuffled_neighbors(self):
-        res = self._db.execute(self.SELECT_SHUFFLE_NEIGHBORS, (self.id,)).fetchone()
-
-        # TODO: this happens if images are added when the shuffle table
-        # was already generated.
-        if res is None:
-            return Image(self._db, 1), Image(self._db, 1)
-
-        pre, nxt = res
-
-        return (Image(self._db, pre), Image(self._db, nxt))
+        return zip(tags, cosine_similarities)
 
 
 class Images:
-    INSERT_IMAGE = "INSERT OR IGNORE INTO images (path) VALUES (?)"
+    INSERT_EXIF = """INSERT OR IGNORE INTO
+        exif (file, tag_id, value)
+        SELECT rowid, :tag_id, :value
+        FROM image_files WHERE hash == :hash"""
+    INSERT_IMAGE = """INSERT OR IGNORE INTO
+        images (file, rotation, width, height)
+        SELECT rowid, :rotation, :width, :height
+        FROM image_files WHERE hash == :hash"""
+    INSERT_IMAGE_FILE = """INSERT OR IGNORE INTO
+        image_files (path, file_size, mime_type, hash, width, height)
+        VALUES (:path, :file_size, :mime_type, :hash, :width, :height)"""
+
+    MIME_TYPES = {"PNG": "image/png", "JPEG": "image/jpeg"}
 
     RE_IMAGE_EXT = re.compile(r"(?i)\.(?:png$)|(?:jpe?g$)")
 
+    ROTATIONS = {0: 0, 1: 0, 3: 180, 6: 270, 8: 90}
+
     SELECT_COUNT = "SELECT COUNT(*) FROM images"
+    SELECT_RANDOM = "SELECT id FROM images ORDER BY random() LIMIT 1"
 
     def __init__(self, db):
         self._db = db
 
     def add_multiple(self, paths: Iterable[str]):
-        params = iter((path,) for path in paths)
-        cur = self._db.executemany(self.INSERT_IMAGE, params)
+        for path in paths:
+            with open(path, "rb") as fd:
+                data = fd.read()
+                hash = hashlib.sha256(data).digest()
+                file_size = len(data)
+                del data
 
-        self._db._embeddings.resize((len(self._db.images) + 1, self._db.EMBEDDING_VEC_LEN))
+            file_meta = {"path": path, "hash": hash, "file_size": file_size}
+            image_meta = {"hash": hash}
 
-        return cur
+            pil = PIL.Image.open(path)
+
+            file_meta["width"] = pil.width
+            file_meta["height"] = pil.height
+            file_meta["mime_type"] = self.MIME_TYPES[pil.format]
+
+            exif = pil.getexif()
+
+            exif_rows = list()
+
+            for tag_id, value in exif.items():
+                if isinstance(value, PIL.TiffImagePlugin.IFDRational):
+                    value = float(value)
+
+                exif_rows.append({"hash": hash, "tag_id": tag_id, "value": value})
+
+            exif_rotation = exif.get(PIL.ExifTags.Base.Orientation, 1)
+            image_meta["rotation"] = self.ROTATIONS[exif_rotation]
+
+            if image_meta["rotation"] in (0, 180):
+                image_meta["width"] = file_meta["width"]
+                image_meta["height"] = file_meta["height"]
+            else:
+                image_meta["width"] = file_meta["height"]
+                image_meta["height"] = file_meta["width"]
+
+            self._db.execute(self.INSERT_IMAGE_FILE, file_meta)
+            self._db.executemany(self.INSERT_EXIF, exif_rows)
+            self._db.execute(self.INSERT_IMAGE, image_meta)
 
     def add(self, path: str):
         self.add_multiple([self.path])
@@ -310,7 +361,18 @@ class Images:
     def add_directory(self, dir: str):
         self.add_directories([dir])
 
-    def __getitem__(self, id: int):
+    def get_random(self):
+        res = self._db.execute(self.SELECT_RANDOM).fetchone()
+
+        if res is None:
+            return None
+
+        return self[res[0]]
+
+    def __getitem__(self, id: str | bytes):
+        if isinstance(id, str):
+            id = bytes.fromhex(id)
+
         return Image(self._db, id)
 
     def __len__(self):

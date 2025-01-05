@@ -75,9 +75,11 @@ async function populate_tag_editor(id) {
       continue;
     }
 
-    if ("estimated" in meta) {
-      tags_estimated.push(meta);
+    if (!("estimated" in meta)) {
+      meta["estimated"] = -1;
     }
+
+    tags_estimated.push(meta);
   }
 
   tags_assigned_pos.sort((a, b) => a["name"] > b["name"]);
@@ -112,15 +114,15 @@ async function populate_tag_editor(id) {
   filter_suggested_tags();
 }
 
-async function roster_img_elem(id) {
-  // TODO: include the info in the list response from the server
-  const info = await get_json(`/images/${id}`);
-  const img = cropped_image(info);
-
+function roster_img_elem(info) {
   const a = document.createElement("a");
-  a.href = `#${id}`;
   a.className = "roster-element";
-  a.append(img);
+
+  if (info) {
+    const img = cropped_image(info);
+    a.append(img);
+    a.href = `#${info.id}`;
+  }
 
   return a;
 }
@@ -134,19 +136,19 @@ async function populate_roster(id) {
   // Start with the next, previous, a shuffled next and shuffled previous
   // image.
   roster_elem.replaceChildren(
-    await roster_img_elem(neighbors.serial_prev),
-    await roster_img_elem(neighbors.serial_next),
-    await roster_img_elem(neighbors.shuffle_prev),
-    await roster_img_elem(neighbors.shuffle_next),
+    roster_img_elem(neighbors.serial_prev),
+    roster_img_elem(neighbors.serial_next),
+    roster_img_elem(neighbors.shuffle_prev),
+    roster_img_elem(neighbors.shuffle_next),
   );
 
   // Then add images that the server deemed similar to this one.
-  // This is a slow operation, hence why we do the two roster updated
+  // This is a slow operation, hence why we do the two roster update
   // in two steps.
   const similar = await get_json(`/images/${id}/similar`);
 
   for (const idx_sim of similar.images.sort((a, b) => a[1] < b[1])) {
-    roster_elem.append(await roster_img_elem(idx_sim[0]));
+    roster_elem.append(roster_img_elem(idx_sim[0]));
   }
 }
 
@@ -166,19 +168,21 @@ async function main() {
   // eslint-disable-next-line no-console
   console.log("OK let's go!");
 
-  let image_id = 1;
+  let image_id;
 
   // Set the initial image based on the URL anchor (if there is one).
   if (window.location.hash) {
     const hash = window.location.hash;
-    image_id = Number(hash.slice(1));
+    image_id = hash.slice(1);
+  } else {
+    const info = await get_json(`/images/random`);
+    image_id = info.id;
   }
 
   // Change the active image based on the current URL hash value
   window.addEventListener("hashchange", (ev) => {
     const url = URL.parse(ev.newURL);
-    const hash = url.hash;
-    image_id = Number(hash.slice(1));
+    image_id = url.hash.slice(1);
 
     load_image(image_id);
   });
