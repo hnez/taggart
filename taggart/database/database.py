@@ -3,6 +3,7 @@
 import sqlite3
 
 from ..preview_decoder import PreviewDecoder
+from .config import Config
 from .image_files import ImageFiles
 from .images import Images
 from .tags import Tags
@@ -14,6 +15,10 @@ class Database:
     LATENTS_SHAPE = (4, 79, 52)
 
     CREATE_TABLES = (
+        """CREATE TABLE IF NOT EXISTS config (
+            key TEXT NOT NULL UNIQUE,
+            value ANY NOT NULL
+        ) STRICT""",
         """CREATE TABLE IF NOT EXISTS image_files (
             path TEXT NOT NULL UNIQUE,
             ts_added INT NOT NULL DEFAULT (unixepoch()),
@@ -71,6 +76,7 @@ class Database:
         self._tag_embeddings = None
         self._cpu = cpu
 
+        self.config = Config(self)
         self.image_files = ImageFiles(self)
         self.images = Images(self)
         self.tags = Tags(self)
