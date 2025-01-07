@@ -16,10 +16,12 @@ class Database:
 
     CREATE_TABLES = (
         """CREATE TABLE IF NOT EXISTS config (
+            rowid INTEGER PRIMARY KEY,
             key TEXT NOT NULL UNIQUE,
             value ANY NOT NULL
         ) STRICT""",
         """CREATE TABLE IF NOT EXISTS image_files (
+            rowid INTEGER PRIMARY KEY,
             path TEXT NOT NULL UNIQUE,
             ts_added INT NOT NULL DEFAULT (unixepoch()),
             file_size INT NOT NULL,
@@ -29,12 +31,14 @@ class Database:
             height INT NOT NULL
         ) STRICT""",
         """CREATE TABLE IF NOT EXISTS exif (
+            rowid INTEGER PRIMARY KEY,
             file INTEGER NOT NULL REFERENCES image_files (rowid),
             tag_id INTEGER NOT NULL,
             value ANY NOT NULL,
             UNIQUE(file, tag_id)
         ) STRICT""",
         """CREATE TABLE IF NOT EXISTS images (
+            rowid INTEGER PRIMARY KEY,
             file INTEGER NOT NULL REFERENCES image_files (rowid),
             id BLOB NOT NULL DEFAULT (randomblob(8)),
             ts_added INT NOT NULL DEFAULT (unixepoch()),
@@ -46,6 +50,7 @@ class Database:
             UNIQUE(file, rotation, crop_left, crop_top, width, height)
         ) STRICT""",
         """CREATE TABLE IF NOT EXISTS tags (
+            rowid INTEGER PRIMARY KEY,
             image INTEGER REFERENCES images (rowid),
             tag TEXT,
             weight REAL NOT NULL DEFAULT 0,
@@ -53,12 +58,14 @@ class Database:
             UNIQUE(image, tag)
         ) STRICT""",
         """CREATE TABLE IF NOT EXISTS embeddings (
+            rowid INTEGER PRIMARY KEY,
             image INTEGER NOT NULL REFERENCES images (rowid),
             type TEXT NOT NULL,
             tensor_row INTEGER NOT NULL,
             UNIQUE(image, type)
         ) STRICT""",
         """CREATE TABLE IF NOT EXISTS latents (
+            rowid INTEGER PRIMARY KEY,
             image INTEGER NOT NULL REFERENCES images (rowid),
             type TEXT NOT NULL,
             tensor_row INTEGER NOT NULL,
