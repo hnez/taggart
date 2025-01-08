@@ -12,7 +12,7 @@ body {
 table {
   width: 100%;
   border-collapse: collapse;
-  margin: 20px 0;
+  margin: 2em 0;
   font-size: 16px;
   text-align: left;
 }
@@ -52,7 +52,6 @@ td:nth-child(3) {
 
 #page {
   max-width: 80em;
-  min-height: 100vh;
   margin: 0 auto;
 
   background-color: white;
