@@ -74,11 +74,13 @@ class Tensor:
         WHERE name == ?"""
     SELECT_ROW_SHAPE = "SELECT row_shape FROM tensors WHERE name == ?"
 
-    def __init__(self, db, name: str):
+    def __init__(self, db, cache, name: str):
         self._db = db
+        self._cache = cache
         self.name = name
-        self._cpu = None
-        self._gpu = None
+
+        if self.name not in self._cache:
+            self._cache[self.name] = dict()
 
     def path(self):
         return f"{self._db._base_path}-{self.name}.tensor"
@@ -150,35 +152,39 @@ class Tensor:
         if shape == [0]:
             return torch.tensor([], dtype=dtype)
 
-        if self._cpu is not None:
-            assert self._cpu.shape[1:] == shape[1:]
+        if "cpu" in self._cache[self.name]:
+            assert self._cache[self.name]["cpu"].shape[1:] == shape[1:]
 
-            if self._cpu.shape[0] < shape[0]:
-                self._cpu = None
+            if self._cache[self.name]["cpu"].shape[0] < shape[0]:
+                del self._cache[self.name]["cpu"]
 
-        if self._cpu is None:
+        if "cpu" not in self._cache[self.name]:
             path = self.path()
 
-            self._cpu = mmap_tensor(path, shape, dtype)
+            with self._db.tracer.start("mmap tensor"):
+                self._cache[self.name]["cpu"] = mmap_tensor(path, shape, dtype)
 
-        # Whoever requested this tensor may write to it, making a GPU copy invalid.
-        self._gpu = None
+        if "gpu" in self._cache[self.name]:
+            # Whoever requested this tensor may write to it, making a GPU copy invalid.
+            del self._cache[self.name]["gpu"]
 
-        return self._cpu[: shape[0]]
+        return self._cache[self.name]["cpu"][: shape[0]]
 
     def gpu(self):
         if self._db._cpu:
             return self.cpu()
 
-        if self._gpu is None:
-            self._gpu = self.cpu().cuda()
+        if "gpu" not in self._cache[self.name]:
+            with self._db.tracer.start("GPU upload"):
+                self._cache[self.name]["gpu"] = self.cpu().cuda()
 
-        return self._gpu
+        return self._cache[self.name]["gpu"]
 
 
 class Tensors:
     def __init__(self, db):
         self._db = db
+        self.cache = dict()
 
     def __getitem__(self, name: str):
-        return Tensor(self._db, name)
+        return Tensor(self._db, self.cache, name)
