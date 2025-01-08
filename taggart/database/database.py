@@ -8,6 +8,7 @@ from .image_files import ImageFiles
 from .images import Images
 from .tags import Tags
 from .tensors import Tensors
+from .tracing import Tracer
 
 
 class Database:
@@ -74,6 +75,8 @@ class Database:
         self._cpu = cpu
         self._base_path = path.removesuffix(".db")
 
+        self.tracer = Tracer()
+
         self.config = Config(self)
         self.image_files = ImageFiles(self)
         self.images = Images(self)
@@ -87,13 +90,13 @@ class Database:
 
         self.execute("PRAGMA optimize")
 
-    def execute(self, *kargs, **kwargs):
-        with self._db:
-            return self._db.execute(*kargs, **kwargs)
+    def execute(self, sql, *kargs, **kwargs):
+        with self._db, self.tracer.start(sql):
+            return self._db.execute(sql, *kargs, **kwargs)
 
-    def executemany(self, *kargs, **kwargs):
-        with self._db:
-            return self._db.executemany(*kargs, **kwargs)
+    def executemany(self, sql, *kargs, **kwargs):
+        with self._db, self.tracer.start(sql):
+            return self._db.executemany(sql, *kargs, **kwargs)
 
 
 if __name__ == "__main__":

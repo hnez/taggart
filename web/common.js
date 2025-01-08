@@ -100,7 +100,7 @@ async function crop_button_onmouseup(ev, image_id, img, crop_box) {
     width: crop_box_bb.width * scaling_factor,
   };
 
-  const image_url = await post_json(`/images/${image_id}/crops`, crop);
+  const image_url = await post_json(`/api/images/${image_id}/crops`, crop);
   const new_id = image_url.match("images/([a-fA-F0-9]+)")[1];
   document.location = `#${new_id}`;
 }

@@ -7,6 +7,7 @@ from collections.abc import Iterable
 
 import PIL.Image
 
+from .tracing import trace
 from .utils import clamp, cosine_similarity, top_k
 
 
@@ -116,6 +117,7 @@ class Image:
 
         return self._db.image_files[hash]
 
+    @trace
     def latent_preview(self):
         lat = self._db.images.latents()
         my_tensor_row = lat.image_to_tensor_row(self)
@@ -178,6 +180,7 @@ class Image:
     def set_latent(self, latent):
         self._db.images.latents().set_image_row(self, latent)
 
+    @trace
     def similar_images(self, count=100):
         emb = self._db.images.embeddings()
         my_tensor_row = emb.image_to_tensor_row(self)
@@ -208,6 +211,7 @@ class Image:
 
         return tuple(result)
 
+    @trace
     def similar_tags(self):
         emb = self._db.images.embeddings()
         my_tensor_row = emb.image_to_tensor_row(self)

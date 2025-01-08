@@ -61,7 +61,7 @@ function remove_tag_from_filter(tag_name) {
 }
 
 async function load_tag_list() {
-  const tags = await get_json("/tags");
+  const tags = await get_json("/api/tags");
 
   const tag_elems = Object.entries(tags)
     .toSorted((nma, nmb) => nma[1]["occurrences"] < nmb[1]["occurrences"])
@@ -83,7 +83,7 @@ async function load_image_list(filter) {
 
   if (filter) {
     const json = await get_json(
-      `/tags/${filter}/images?assigned=false&estimated=true`,
+      `/api/tags/${filter}/images?assigned=false&estimated=true`,
     );
 
     images = json.images;

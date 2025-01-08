@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+from .tracing import trace
 from .utils import cosine_similarity, top_k
 
 
@@ -8,6 +9,7 @@ class TagList:
         self._db = db
         self.tags = tags
 
+    @trace
     def similar_images(self, count=1000):
         tag_names, tag_embs = self._db.tags.embeddings()
 
@@ -57,6 +59,7 @@ class Tags:
         self._db = db
         self._embeddings = None
 
+    @trace
     def embeddings(self):
         if self._embeddings is None:
             tensor_name = self._db.config.get("default-embeddings", "siglip-so400m-patch14-384")

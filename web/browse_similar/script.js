@@ -37,7 +37,9 @@ function tag_elem(image_id, tag_name, weight, where) {
 }
 
 async function set_tag_weight(image_id, tag_name, weight) {
-  await put_json(`/images/${image_id}/tags/${tag_name}`, { assigned: weight });
+  await put_json(`/api/images/${image_id}/tags/${tag_name}`, {
+    assigned: weight,
+  });
   await populate_tag_editor(image_id);
 }
 
@@ -60,7 +62,7 @@ function filter_suggested_tags() {
 }
 
 async function populate_tag_editor(id) {
-  const tags = await get_json(`/images/${id}/tags`);
+  const tags = await get_json(`/api/images/${id}/tags`);
 
   const tags_assigned_pos = [];
   const tags_assigned_neg = [];
@@ -130,7 +132,7 @@ function roster_img_elem(info) {
 async function populate_roster(id) {
   const roster_elem = document.querySelector("#roster");
 
-  const neighbors = await get_json(`/images/${id}/neighbors`);
+  const neighbors = await get_json(`/api/images/${id}/neighbors`);
 
   // Populate the roster of other images
   // Start with the next, previous, a shuffled next and shuffled previous
@@ -145,7 +147,7 @@ async function populate_roster(id) {
   // Then add images that the server deemed similar to this one.
   // This is a slow operation, hence why we do the two roster update
   // in two steps.
-  const similar = await get_json(`/images/${id}/similar`);
+  const similar = await get_json(`/api/images/${id}/similar`);
 
   for (const idx_sim of similar.images.sort((a, b) => a[1] < b[1])) {
     roster_elem.append(roster_img_elem(idx_sim[0]));
@@ -153,7 +155,7 @@ async function populate_roster(id) {
 }
 
 async function load_image(id) {
-  const info = await get_json(`/images/${id}`);
+  const info = await get_json(`/api/images/${id}`);
 
   document.querySelector("#latent-image").src = info.latent_url || "";
 
@@ -175,7 +177,7 @@ async function main() {
     const hash = window.location.hash;
     image_id = hash.slice(1);
   } else {
-    const info = await get_json(`/images/random`);
+    const info = await get_json(`/api/images/random`);
     image_id = info.id;
   }
 

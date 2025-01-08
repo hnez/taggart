@@ -20,6 +20,9 @@ class Server:
         ("/browse_tags/", "browse_tags/index.html"),
         ("/browse_tags/script.js", "browse_tags/script.js"),
         ("/browse_tags/style.css", "browse_tags/style.css"),
+        ("/statistics/", "statistics/index.html"),
+        ("/statistics/script.js", "statistics/script.js"),
+        ("/statistics/style.css", "statistics/style.css"),
     )
 
     QP_TRUEISH = {"": True, "0": False, "1": True, "false": False, "true": True, "no": False, "yes": True}
@@ -33,22 +36,24 @@ class Server:
 
         self.app.get("/image_files/<hash>.jpg", callback=self.get_image_file)
 
-        self.app.get("/images", callback=self.get_images)
-        self.app.get("/images/random", callback=self.redirect_image_random)
-        self.app.get("/images/<id>", callback=self.get_image_info)
-        self.app.get("/images/<id>/latent/preview.png", callback=self.get_latent_preview_file)
+        self.app.get("/api/images", callback=self.get_images)
+        self.app.get("/api/images/random", callback=self.redirect_image_random)
+        self.app.get("/api/images/<id>", callback=self.get_image_info)
+        self.app.get("/api/images/<id>/latent/preview.png", callback=self.get_latent_preview_file)
 
-        self.app.post("/images/<id>/crops", callback=self.post_image_crop)
+        self.app.post("/api/images/<id>/crops", callback=self.post_image_crop)
 
-        self.app.get("/images/<id>/neighbors", callback=self.get_image_neighbors)
-        self.app.get("/images/<id>/similar", callback=self.get_image_similar)
+        self.app.get("/api/images/<id>/neighbors", callback=self.get_image_neighbors)
+        self.app.get("/api/images/<id>/similar", callback=self.get_image_similar)
 
-        self.app.get("/images/<id>/tags", callback=self.get_image_tags)
-        self.app.get("/images/<id>/tags/<tag>", callback=self.get_image_tag)
-        self.app.put("/images/<id>/tags/<tag>", callback=self.set_image_tag)
+        self.app.get("/api/images/<id>/tags", callback=self.get_image_tags)
+        self.app.get("/api/images/<id>/tags/<tag>", callback=self.get_image_tag)
+        self.app.put("/api/images/<id>/tags/<tag>", callback=self.set_image_tag)
 
-        self.app.get("/tags", callback=self.get_tags)
-        self.app.get("/tags/<filter>/images", callback=self.get_tag_images)
+        self.app.get("/api/tags", callback=self.get_tags)
+        self.app.get("/api/tags/<filter>/images", callback=self.get_tag_images)
+
+        self.app.get("/api/statistics", callback=self.get_statistics)
 
     def _clean_tag_name(self, name):
         return name.strip().lower()
@@ -75,7 +80,7 @@ class Server:
         url = f"/image_files/{image_file.hexhash}.jpg"
 
         # TODO: only add if it exists
-        latent_url = f"/images/{image.hexid}/latent/preview.png"
+        latent_url = f"/api/images/{image.hexid}/latent/preview.png"
 
         return {"id": image.hexid, "url": url, "crop": crop, "latent_url": latent_url}
 
@@ -194,3 +199,6 @@ class Server:
         )
 
         return {"images": images}
+
+    def get_statistics(self):
+        return {"calls": self.db.tracer.calls, "durations": self.db.tracer.durations}
