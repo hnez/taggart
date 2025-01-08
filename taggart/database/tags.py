@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-from .images import Image
 from .utils import cosine_similarity, top_k
 
 
@@ -10,13 +9,15 @@ class TagList:
         self.tags = tags
 
     def similar_images(self, count=1000):
-        embeddings = self._db._embeddings.read_only()
-        tag_names, tag_embs = self._db.tag_embeddings()
+        tag_names, tag_embs = self._db.tags.embeddings()
 
         tag_ids = list(i for i, n in enumerate(tag_names) if n in self.tags)
 
         tag_embs = tag_embs[tag_ids]
 
+        emb = self._db.images.embeddings()
+
+        embeddings = emb.gpu()
         embeddings = embeddings.unsqueeze(1).unsqueeze(2)
         tag_embs = tag_embs.unsqueeze(0).unsqueeze(3)
 
@@ -27,7 +28,7 @@ class TagList:
         res = list()
 
         for index, value in top_k(cosine_similarities, count):
-            image = Image.from_tensor_row(self._db, index)
+            image = emb.tensor_row_to_image(index)
 
             if image is None:
                 continue
@@ -45,13 +46,17 @@ class Tag(TagList):
 
 
 class Tags:
+    SELECT_ALL_TAG_TENSOR_ROW_WEIGHTS = """SELECT tag, tensor_row, weight FROM tags
+        INNER JOIN tensor_rows ON tensor_rows.image == tags.image
+        INNER JOIN tensors ON tensors.rowid == tensor_rows.tensor
+        WHERE tensors.name == ?"""
     SELECT_TAGS = "SELECT DISTINCT tag FROM tags"
     SELECT_OCCURRENCES = """SELECT tag, COUNT(image) FROM tags WHERE weight != 0 GROUP BY tag"""
 
     def __init__(self, db):
         self._db = db
+        self._embeddings = None
 
-    @trace
     def embeddings(self):
         if self._embeddings is None:
             tensor_name = self._db.config.get("default-embeddings", "siglip-so400m-patch14-384")
@@ -71,9 +76,7 @@ class Tags:
             if len(tag_embeddings) > 0:
                 tag_names, tag_embeddings = zip(*tag_embeddings.items())
 
-                tag_embeddings = torch.stack(tag_embeddings)
-
-                self._embeddings = (tag_names, tag_embeddings)
+                self._embeddings = (tag_names, embeddings)
 
         return self._embeddings
 

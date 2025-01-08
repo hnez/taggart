@@ -144,7 +144,7 @@ class Server:
 
         tags = dict((tag.tag, {}) for tag in self.db.tags)
 
-        for tag_name, value in image.similar_tags():
+        for tag_name, value in image.similar_tags() or []:
             tags[tag_name]["estimated"] = value
 
         for image_tag in image.tags:

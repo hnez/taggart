@@ -12,16 +12,7 @@ from .embeddings import ImagesToEmbedDataset
 
 
 class ImagesToVaeDataset(ImagesToEmbedDataset):
-    CREATE_TMP_TABLE = """CREATE TEMPORARY TABLE images_to_vae AS
-        SELECT rowid AS image FROM images
-        EXCEPT SELECT image FROM latents WHERE type == 'sd15-79x52'"""
-
-    DROP_TMP_TABLE = "DROP TABLE images_to_vae"
-
-    SELECT_COUNT = "SELECT COUNT(*) FROM images_to_vae"
-    SELECT_IMAGE = """SELECT id FROM images_to_vae
-        INNER JOIN images ON images.rowid == images_to_vae.image
-        WHERE images_to_vae.rowid == (? + 1)"""
+    TENSOR_NAME = "sd15-79x52"
 
 
 def load_image_processor(width, height):
@@ -67,8 +58,8 @@ def load_encoder():
 
 @torch.no_grad
 def add_latents(db: Database, batch_size: int, num_workers):
-    width = db.LATENTS_SHAPE[2] * 8
-    height = db.LATENTS_SHAPE[1] * 8
+    width = 52 * 8
+    height = 79 * 8
 
     image_processor = load_image_processor(width, height)
     dataset = ImagesToVaeDataset(db, image_processor)

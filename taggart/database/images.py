@@ -31,7 +31,7 @@ class ImageTag:
 
         # TODO: update the embeddings right here by adding the image embeddings
         # _if_ the tag was not already on the image before.
-        self._db._tag_embeddings = None
+        self._db.tags._tag_embeddings = None
 
 
 class ImageTags:
@@ -65,29 +65,8 @@ class Image:
     INSERT_CROPPED_COPY = """INSERT INTO images (file, rotation, crop_left, crop_top, width, height)
         SELECT file, ?, ?, ?, ?, ?
         FROM images WHERE id == ?"""
-    INSERT_EMBEDDING = """INSERT OR IGNORE INTO embeddings (image, type, tensor_row)
-        VALUES (
-            (SELECT rowid FROM images WHERE id == ?),
-            'siglip',
-            (SELECT COALESCE(MAX(tensor_row) + 1, 0) FROM embeddings WHERE type == 'siglip')
-        )"""
-    INSERT_LATENT = """INSERT OR IGNORE INTO latents (image, type, tensor_row)
-        VALUES (
-            (SELECT rowid FROM images WHERE id == ?),
-            'siglip',
-            (SELECT COALESCE(MAX(tensor_row) + 1, 0) FROM latents WHERE type == 'sd15-79x52')
-        )"""
 
     SELECT_BY_ROWID = "SELECT id FROM images WHERE rowid == ?"
-    SELECT_EMBEDDINGS_TENSOR_ROW = """SELECT tensor_row FROM embeddings
-        INNER JOIN images ON images.rowid == embeddings.image
-        WHERE id == ? AND type == 'siglip'"""
-    SELECT_LATENTS_TENSOR_ROW = """SELECT tensor_row FROM latents
-        INNER JOIN images ON images.rowid == latents.image
-        WHERE id == ? AND type == 'sd15-79x52'"""
-    SELECT_ID_FOR_TENSOR_ROW = """SELECT id FROM images
-        INNER JOIN embeddings ON images.rowid == embeddings.image
-        WHERE tensor_row == ? AND type == 'siglip'"""
     SELECT_CROP = """SELECT
         rotation, crop_left, crop_top, images.width, images.height, image_files.width, image_files.height
         FROM images INNER JOIN image_files ON image_files.rowid == images.file
@@ -108,15 +87,6 @@ class Image:
         self.id = id
         self.hexid = id.hex()
         self.tags = ImageTags(self._db, self.id)
-
-    @classmethod
-    def from_tensor_row(cls, db, tensor_row):
-        res = db.execute(cls.SELECT_ID_FOR_TENSOR_ROW, (tensor_row,)).fetchone()
-
-        if res is None:
-            return None
-
-        return cls(db, res[0])
 
     def crop_dimensions(self):
         (rotation, crop_left, crop_top, width, height, file_width, file_height) = self._db.execute(
@@ -147,15 +117,14 @@ class Image:
         return self._db.image_files[hash]
 
     def latent_preview(self):
-        res = self._db.execute(self.SELECT_LATENTS_TENSOR_ROW, (self.id,)).fetchone()
+        lat = self._db.images.latents()
+        my_tensor_row = lat.image_to_tensor_row(self)
 
-        if res is None:
+        if my_tensor_row is None:
             return None
 
-        (tensor_row,) = res
-
-        latents = self._db._latents.read_write()
-        latent = latents[tensor_row : tensor_row + 1]
+        latents = lat.cpu()
+        latent = latents[my_tensor_row : my_tensor_row + 1]
 
         output = self._db.preview_decoder.forward(latent)
         output = output[0].transpose(0, -1).transpose(0, 1)
@@ -204,34 +173,19 @@ class Image:
         return pil
 
     def set_embedding(self, embedding):
-        self._db.execute(self.INSERT_EMBEDDING, (self.id,))
-
-        (tensor_row,) = self._db.execute(self.SELECT_EMBEDDINGS_TENSOR_ROW, (self.id,)).fetchone()
-
-        self._db._embeddings.grow_rows(tensor_row + 1)
-
-        rw = self._db._embeddings.read_write()
-        rw[tensor_row] = embedding.to(rw.device)
+        self._db.images.embeddings().set_image_row(self, embedding)
 
     def set_latent(self, latent):
-        self._db.execute(self.INSERT_LATENT, (self.id,))
-
-        (tensor_row,) = self._db.execute(self.SELECT_LATENTS_TENSOR_ROW, (self.id,)).fetchone()
-
-        self._db._latents.grow_rows(tensor_row + 1)
-
-        rw = self._db._latents.read_write()
-        rw[tensor_row] = latent.to(rw.device)
+        self._db.images.latents().set_image_row(self, latent)
 
     def similar_images(self, count=100):
-        res = self._db.execute(self.SELECT_EMBEDDINGS_TENSOR_ROW, (self.id,)).fetchone()
+        emb = self._db.images.embeddings()
+        my_tensor_row = emb.image_to_tensor_row(self)
 
-        if res is None:
+        if my_tensor_row is None:
             return tuple()
 
-        (my_tensor_row,) = res
-
-        embeddings = self._db._embeddings.read_only()
+        embeddings = emb.gpu()
         image_emb = embeddings[my_tensor_row]
 
         embeddings = embeddings.unsqueeze(-2)
@@ -245,7 +199,7 @@ class Image:
             if tensor_row == my_tensor_row:
                 continue
 
-            image = Image.from_tensor_row(tensor_row)
+            image = emb.tensor_row_to_image(tensor_row)
 
             if image is None:
                 continue
@@ -255,16 +209,20 @@ class Image:
         return tuple(result)
 
     def similar_tags(self):
-        res = self._db.execute(self.SELECT_EMBEDDINGS_TENSOR_ROW, (self.id,)).fetchone()
+        emb = self._db.images.embeddings()
+        my_tensor_row = emb.image_to_tensor_row(self)
 
-        if res is None:
-            return dict()
+        if my_tensor_row is None:
+            return None
 
-        (my_tensor_row,) = res
-
-        embeddings = self._db._embeddings.read_only()
+        embeddings = emb.gpu()
         image_emb = embeddings[my_tensor_row]
-        tags, tag_emb = self._db.tag_embeddings()
+        tags_emb = self._db.tags.embeddings()
+
+        if tags_emb is None:
+            return []
+
+        tags, tag_emb = tags_emb
 
         tag_emb = tag_emb.unsqueeze(-2)
         image_emb = image_emb.unsqueeze(0).unsqueeze(-1)
@@ -288,7 +246,7 @@ class Images:
         image_files (path, file_size, mime_type, hash, width, height)
         VALUES (:path, :file_size, :mime_type, :hash, :width, :height)"""
 
-    MIME_TYPES = {"PNG": "image/png", "JPEG": "image/jpeg"}
+    MIME_TYPES = {"PNG": "image/png", "JPEG": "image/jpeg", "MPO": "image/jpeg"}
 
     RE_IMAGE_EXT = re.compile(r"(?i)\.(?:png$)|(?:jpe?g$)")
 
@@ -361,6 +319,10 @@ class Images:
     def add_directory(self, dir: str):
         self.add_directories([dir])
 
+    def embeddings(self):
+        tensor_name = self._db.config.get("default-embeddings", "siglip-so400m-patch14-384")
+        return self._db.tensors[tensor_name]
+
     def get_random(self):
         res = self._db.execute(self.SELECT_RANDOM).fetchone()
 
@@ -368,6 +330,10 @@ class Images:
             return None
 
         return self[res[0]]
+
+    def latents(self):
+        tensor_name = self._db.config.get("default-latents", "sd15-79x52")
+        return self._db.tensors[tensor_name]
 
     def __getitem__(self, id: str | bytes):
         if isinstance(id, str):

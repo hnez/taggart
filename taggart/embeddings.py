@@ -10,22 +10,26 @@ from .database import Database
 
 
 class ImagesToEmbedDataset(Dataset):
-    CREATE_TMP_TABLE = """CREATE TEMPORARY TABLE images_to_embed AS
+    CREATE_TMP_TABLE = """CREATE TEMPORARY TABLE images_to_process AS
         SELECT rowid AS image FROM images
-        EXCEPT SELECT image FROM embeddings WHERE type == 'siglip'"""
+        EXCEPT SELECT image FROM tensor_rows
+        INNER JOIN tensors ON tensors.rowid == tensor_rows.tensor
+        WHERE tensors.name == ?"""
 
-    DROP_TMP_TABLE = "DROP TABLE images_to_embed"
+    DROP_TMP_TABLE = "DROP TABLE images_to_process"
 
-    SELECT_COUNT = "SELECT COUNT(*) FROM images_to_embed"
-    SELECT_IMAGE = """SELECT id FROM images_to_embed
-        INNER JOIN images ON images.rowid == images_to_embed.image
-        WHERE images_to_embed.rowid == (? + 1)"""
+    SELECT_COUNT = "SELECT COUNT(*) FROM images_to_process"
+    SELECT_IMAGE = """SELECT id FROM images_to_process
+        INNER JOIN images ON images.rowid == images_to_process.image
+        WHERE images_to_process.rowid == (? + 1)"""
+
+    TENSOR_NAME = "siglip-so400m-patch14-384"
 
     def __init__(self, db: Database, image_processor: AutoProcessor):
         self.db = db
         self.image_processor = image_processor
 
-        self.db.execute(self.CREATE_TMP_TABLE)
+        self.db.execute(self.CREATE_TMP_TABLE, (self.TENSOR_NAME,))
 
     def __getitem__(self, index: int):
         (image_id,) = self.db.execute(self.SELECT_IMAGE, (index,)).fetchone()

@@ -7,13 +7,10 @@ from .config import Config
 from .image_files import ImageFiles
 from .images import Images
 from .tags import Tags
-from .tensor_file import TensorFile
+from .tensors import Tensors
 
 
 class Database:
-    EMBEDDING_VEC_LEN = 1152
-    LATENTS_SHAPE = (4, 79, 52)
-
     CREATE_TABLES = (
         """CREATE TABLE IF NOT EXISTS config (
             rowid INTEGER PRIMARY KEY,
@@ -57,46 +54,36 @@ class Database:
             ts_added INT NOT NULL DEFAULT (unixepoch()),
             UNIQUE(image, tag)
         ) STRICT""",
-        """CREATE TABLE IF NOT EXISTS embeddings (
+        """CREATE TABLE IF NOT EXISTS tensors (
             rowid INTEGER PRIMARY KEY,
-            image INTEGER NOT NULL REFERENCES images (rowid),
-            type TEXT NOT NULL,
-            tensor_row INTEGER NOT NULL,
-            UNIQUE(image, type)
+            name TEXT NOT NULL UNIQUE,
+            row_shape TEXT NOT NULL,
+            dtype TEXT NOT NULL
         ) STRICT""",
-        """CREATE TABLE IF NOT EXISTS latents (
+        """CREATE TABLE IF NOT EXISTS tensor_rows (
             rowid INTEGER PRIMARY KEY,
+            tensor INTEGER NOT NULL REFERENCES tensors (rowid),
             image INTEGER NOT NULL REFERENCES images (rowid),
-            type TEXT NOT NULL,
             tensor_row INTEGER NOT NULL,
-            UNIQUE(image, type)
+            UNIQUE(tensor, image)
         ) STRICT """,
     )
 
-    SELECT_ALL_TAG_TENSOR_ROW_WEIGHTS = """SELECT tag, tensor_row, weight FROM tags
-        INNER JOIN images ON tags.image == images.rowid
-        INNER JOIN embeddings ON embeddings.image == images.rowid
-        WHERE embeddings.type == 'siglip'"""
-
     def __init__(self, path: str, cpu=False):
         self._db = sqlite3.connect(path)
-        self._tag_embeddings = None
         self._cpu = cpu
+        self._base_path = path.removesuffix(".db")
 
         self.config = Config(self)
         self.image_files = ImageFiles(self)
         self.images = Images(self)
         self.tags = Tags(self)
+        self.tensors = Tensors(self)
 
         self.preview_decoder = PreviewDecoder()
 
         for create in self.CREATE_TABLES:
             self.execute(create)
-
-        base_path = path.removesuffix(".db")
-
-        self._embeddings = TensorFile(f"{base_path}.embeddings", (0, self.EMBEDDING_VEC_LEN), cpu)
-        self._latents = TensorFile(f"{base_path}.latents", (0, *self.LATENTS_SHAPE), cpu)
 
     def execute(self, *kargs, **kwargs):
         with self._db:
@@ -105,26 +92,6 @@ class Database:
     def executemany(self, *kargs, **kwargs):
         with self._db:
             return self._db.executemany(*kargs, **kwargs)
-
-    def tag_embeddings(self):
-        if self._tag_embeddings is None:
-            embeddings = self._embeddings.read_only()
-
-            tag_embeddings = dict()
-
-            for tag, tensor_row, weight in self.execute(self.SELECT_ALL_TAG_TENSOR_ROW_WEIGHTS):
-                weighted = embeddings[tensor_row] * weight
-
-                if tag in tag_embeddings:
-                    tag_embeddings[tag] += weighted
-                else:
-                    tag_embeddings[tag] = weighted
-
-            tag_names, tag_embeddings = zip(*tag_embeddings.items())
-
-            self._tag_embeddings = (tag_names, embeddings)
-
-        return self._tag_embeddings
 
 
 if __name__ == "__main__":
