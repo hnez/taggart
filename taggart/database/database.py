@@ -85,6 +85,8 @@ class Database:
         for create in self.CREATE_TABLES:
             self.execute(create)
 
+        self.execute("PRAGMA optimize")
+
     def execute(self, *kargs, **kwargs):
         with self._db:
             return self._db.execute(*kargs, **kwargs)
