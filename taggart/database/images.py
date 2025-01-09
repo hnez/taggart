@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import hashlib
+import json
 import os
 import re
 from collections.abc import Iterable
@@ -9,6 +10,19 @@ import PIL.Image
 
 from .tracing import trace
 from .utils import clamp, cosine_similarity, top_k
+
+
+def clean_exif_value(value):
+    if isinstance(value, PIL.TiffImagePlugin.IFDRational):
+        try:
+            value = float(value)
+        except ZeroDivisionError:
+            value = float("nan")
+
+    if isinstance(value, tuple):
+        value = json.dumps(list(clean_exif_value(v) for v in value))
+
+    return value
 
 
 class ImageTag:
@@ -250,7 +264,7 @@ class Images:
         image_files (path, file_size, mime_type, hash, width, height)
         VALUES (:path, :file_size, :mime_type, :hash, :width, :height)"""
 
-    MIME_TYPES = {"PNG": "image/png", "JPEG": "image/jpeg", "MPO": "image/jpeg"}
+    MIME_TYPES = {"BMP": "image/bmp", "PNG": "image/png", "JPEG": "image/jpeg", "MPO": "image/jpeg"}
 
     RE_IMAGE_EXT = re.compile(r"(?i)\.(?:png$)|(?:jpe?g$)")
 
@@ -258,70 +272,71 @@ class Images:
 
     SELECT_COUNT = "SELECT COUNT(*) FROM images"
     SELECT_RANDOM = "SELECT id FROM images ORDER BY random() LIMIT 1"
+    SELECT_PATH_EXISTS = "SELECT 1 FROM image_files WHERE path == ?"
 
     def __init__(self, db):
         self._db = db
 
     def add_multiple(self, paths: Iterable[str]):
         for path in paths:
-            with open(path, "rb") as fd:
-                data = fd.read()
-                hash = hashlib.sha256(data).digest()
-                file_size = len(data)
-                del data
-
-            file_meta = {"path": path, "hash": hash, "file_size": file_size}
-            image_meta = {"hash": hash}
-
-            pil = PIL.Image.open(path)
-
-            file_meta["width"] = pil.width
-            file_meta["height"] = pil.height
-            file_meta["mime_type"] = self.MIME_TYPES[pil.format]
-
-            exif = pil.getexif()
-
-            exif_rows = list()
-
-            for tag_id, value in exif.items():
-                if isinstance(value, PIL.TiffImagePlugin.IFDRational):
-                    value = float(value)
-
-                exif_rows.append({"hash": hash, "tag_id": tag_id, "value": value})
-
-            exif_rotation = exif.get(PIL.ExifTags.Base.Orientation, 1)
-            image_meta["rotation"] = self.ROTATIONS[exif_rotation]
-
-            if image_meta["rotation"] in (0, 180):
-                image_meta["width"] = file_meta["width"]
-                image_meta["height"] = file_meta["height"]
-            else:
-                image_meta["width"] = file_meta["height"]
-                image_meta["height"] = file_meta["width"]
-
-            self._db.execute(self.INSERT_IMAGE_FILE, file_meta)
-            self._db.executemany(self.INSERT_EXIF, exif_rows)
-            self._db.execute(self.INSERT_IMAGE, image_meta)
+            try:
+                self.add(path)
+            except Exception as e:
+                print(f'Failed to import "{path}": {e}')
 
     def add(self, path: str):
-        self.add_multiple([self.path])
+        if self._db.execute(self.SELECT_PATH_EXISTS, (path,)).fetchone() is not None:
+            return
+
+        with open(path, "rb") as fd:
+            data = fd.read()
+            hash = hashlib.sha256(data).digest()
+            file_size = len(data)
+            del data
+
+        file_meta = {"path": path, "hash": hash, "file_size": file_size}
+        image_meta = {"hash": hash}
+
+        pil = PIL.Image.open(path)
+
+        file_meta["width"] = pil.width
+        file_meta["height"] = pil.height
+        file_meta["mime_type"] = self.MIME_TYPES[pil.format]
+
+        exif = pil.getexif()
+
+        exif_rows = list(
+            {"hash": hash, "tag_id": tag_id, "value": clean_exif_value(value)} for tag_id, value in exif.items()
+        )
+
+        exif_rotation = exif.get(PIL.ExifTags.Base.Orientation, 1)
+        image_meta["rotation"] = self.ROTATIONS[exif_rotation]
+
+        if image_meta["rotation"] in (0, 180):
+            image_meta["width"] = file_meta["width"]
+            image_meta["height"] = file_meta["height"]
+        else:
+            image_meta["width"] = file_meta["height"]
+            image_meta["height"] = file_meta["width"]
+
+        self._db.execute(self.INSERT_IMAGE_FILE, file_meta)
+        self._db.executemany(self.INSERT_EXIF, exif_rows)
+        self._db.execute(self.INSERT_IMAGE, image_meta)
 
     def add_directories(self, dirs: Iterable[str]):
         for dir in dirs:
-            for dirpath, _dirnames, filenames in os.walk(dir):
-                paths = tuple(
-                    os.path.join(dirpath, name) for name in sorted(filenames) if self.RE_IMAGE_EXT.search(name)
-                )
-
-                if len(paths) == 0:
-                    continue
-
-                self.add_multiple(paths)
-
-                print(f"Added {len(paths)} images from {dirpath}")
+            self.add_directory(dir)
 
     def add_directory(self, dir: str):
-        self.add_directories([dir])
+        for dirpath, _dirnames, filenames in os.walk(dir):
+            paths = tuple(os.path.join(dirpath, name) for name in sorted(filenames) if self.RE_IMAGE_EXT.search(name))
+
+            if len(paths) == 0:
+                continue
+
+            self.add_multiple(paths)
+
+            print(f"Added {len(paths)} images from {dirpath}")
 
     def embeddings(self):
         tensor_name = self._db.config.get("default-embeddings", "siglip-so400m-patch14-384")
