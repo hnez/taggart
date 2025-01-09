@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import torch
+
 from .tracing import trace
 from .utils import cosine_similarity, top_k
 
@@ -79,7 +81,9 @@ class Tags:
             if len(tag_embeddings) > 0:
                 tag_names, tag_embeddings = zip(*tag_embeddings.items())
 
-                self._embeddings = (tag_names, embeddings)
+                tag_embeddings = torch.stack(tag_embeddings)
+
+                self._embeddings = (tag_names, tag_embeddings)
 
         return self._embeddings
 
