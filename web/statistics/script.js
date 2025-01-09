@@ -27,7 +27,8 @@ async function populate_trace_table() {
   const row_elems = [header];
 
   for (const row of rows) {
-    const duration = (row.duration / 1e9).toFixed(3);
+    const total_duration = (row.duration / 1e9).toFixed(3);
+    const per_call_duration = (row.duration / row.calls / 1e6).toFixed(3);
 
     const tr = document.createElement("tr");
 
@@ -35,13 +36,17 @@ async function populate_trace_table() {
     td_name.textContent = row.name;
     tr.append(td_name);
 
-    const td_duration = document.createElement("td");
-    td_duration.textContent = `${duration} s`;
-    tr.append(td_duration);
+    const td_total_duration = document.createElement("td");
+    td_total_duration.textContent = `${total_duration} s`;
+    tr.append(td_total_duration);
 
     const td_calls = document.createElement("td");
     td_calls.textContent = row.calls;
     tr.append(td_calls);
+
+    const td_call_duration = document.createElement("td");
+    td_call_duration.textContent = `${per_call_duration} ms`;
+    tr.append(td_call_duration);
 
     row_elems.push(tr);
   }
