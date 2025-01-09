@@ -101,7 +101,7 @@ class Server:
         if image is None:
             pass
 
-        bottle.redirect(f"/images/{image.hexid}")
+        bottle.redirect(f"/api/images/{image.hexid}")
 
     def get_image_info(self, id: str):
         return self._image_info(self.db.images[id])
