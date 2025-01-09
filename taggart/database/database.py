@@ -70,6 +70,20 @@ class Database:
         ) STRICT """,
     )
 
+    CREATE_INDICES = (
+        "CREATE INDEX IF NOT EXISTS config_key ON config (key)",
+        "CREATE INDEX IF NOT EXISTS image_files_path ON image_files (path)",
+        "CREATE INDEX IF NOT EXISTS image_files_hash ON image_files (hash)",
+        "CREATE INDEX IF NOT EXISTS image_id ON images (id)",
+        "CREATE INDEX IF NOT EXISTS tags_tag ON tags (tag)",
+        "CREATE INDEX IF NOT EXISTS tags_image ON tags (image)",
+        "CREATE INDEX IF NOT EXISTS tensors_name ON tensors (name)",
+        "CREATE INDEX IF NOT EXISTS tensor_rows_tensor ON tensor_rows (tensor)",
+        "CREATE INDEX IF NOT EXISTS tensor_rows_image ON tensor_rows (image)",
+        "CREATE INDEX IF NOT EXISTS tensor_rows_tensor_image ON tensor_rows (tensor, image)",
+        "CREATE INDEX IF NOT EXISTS tensor_rows_tensor_row ON tensor_rows (tensor_row)",
+    )
+
     def __init__(self, path: str, cpu=False):
         self._db = sqlite3.connect(path)
         self._cpu = cpu
@@ -85,7 +99,7 @@ class Database:
 
         self.preview_decoder = PreviewDecoder()
 
-        for create in self.CREATE_TABLES:
+        for create in self.CREATE_TABLES + self.CREATE_INDICES:
             self.execute(create)
 
         self.execute("PRAGMA optimize")
