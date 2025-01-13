@@ -61,7 +61,7 @@ View images in the web interface until you find one that you want to add a tag t
 
 Once you have tagged a few images you can start browsing by tag:
 
-![Browsing images by tag](.assets/01-browse-similar.png)
+![Browsing images by tag](.assets/02-browse-tags.png)
 
 ---
 
