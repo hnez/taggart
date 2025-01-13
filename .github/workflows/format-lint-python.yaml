@@ -1,0 +1,21 @@
+name: Python
+
+on: [pull_request, push]
+
+jobs:
+  format-and-lint:
+    name: Format and Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: python3 -m pip install ruff
+
+      - name: Check Format
+        run: ruff format --check
+
+      - name: Lint
+        run: ruff check

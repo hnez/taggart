@@ -1,0 +1,19 @@
+name: Codespell
+
+on:
+  pull_request:
+  push:
+  schedule:
+    - cron: "48 20 * * 4"
+
+jobs:
+  codespell:
+    name: Spellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: git log --reverse > git-history.txt
+      - run: python3 -m pip install codespell
+      - run: codespell
